@@ -1,43 +1,122 @@
-use crate::config::{BUFFER_POOL_N_FRAMES, PAGE_SIZE};
+use crate::config::PAGE_SIZE;
+use crate::storage::DiskManager;
+
 use std::collections::HashMap;
+use std::io::{Read, Seek};
+use std::sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard};
 
-type PageId = u16;
-type FrameId = u16;
+use crate::buffer_pool::frame::{Frame, FrameId};
 
-pub struct PageMetadata {
-    rf: u32,
-    frame: FrameId,
-    dirty: bool,
-}
+/// For simplicity, the page id also represents the offset in the database file
+pub type PageId = u16;
 
-pub struct BufferPool {
-    page_table: HashMap<PageId, PageMetadata>,
+/// # Design principles
+///
+/// - Data locality: a page only stores tuples that are in the same table.
+/// - Simplicity: no page directory is neede because page ids represent offsets in the DB file.
+pub struct BufferPool<R: Read + Seek> {
+    pool_size: usize,
+    /// Stores the metadata of the pages in the buffer pool
+    /// The buffer pool must guarantee that all entries here are loaded in memory.
+    frames: HashMap<FrameId, Frame>,
+    /// Maps page id to buffer pool frame id. Returns None if the page is not in the buffer pool.
+    page_table: HashMap<PageId, FrameId>,
     free_list: Vec<FrameId>,
-    pages: Box<[u8]>,
+    disk_manager: DiskManager<R>,
 }
 
-impl BufferPool {
+impl<R: Read + Seek> BufferPool<R> {
     /// Creates a new buffer pool manager with the given size
-    pub fn new(pool_size: usize) -> Self {
-        let page_table = HashMap::with_capacity(pool_size);
-        let pages = vec![0u8; pool_size * PAGE_SIZE].into_boxed_slice();
+    pub fn new(pool_size: usize, reader: R) -> Self {
+        let mut frames = HashMap::with_capacity(pool_size);
+
+        //  TODO: log to the console that the database is allocating the buffer pool
+        for i in 0..pool_size {
+            let data = vec![0u8; PAGE_SIZE].into_boxed_slice();
+            frames.insert(i as FrameId, Frame::new(data));
+        }
+
         let free_list = (0..pool_size as FrameId).collect();
+        let disk_manager = DiskManager::new(reader);
 
         BufferPool {
-            page_table,
-            pages,
+            pool_size,
+            frames,
             free_list,
+            page_table: HashMap::new(),
+            disk_manager,
         }
     }
 
-    /// Returns the number of frames in the buffer pool
+    pub fn get_page_read(&mut self, page_id: &PageId) -> RwLockReadGuard<'_, Box<[u8]>> {
+        match self.page_table.get(page_id) {
+            Some(frame_id) => {
+                // NOTE: Look for race conditions here
+                let frame = self.frames.get(frame_id).unwrap();
+                frame.data.read().unwrap_or_else(PoisonError::into_inner)
+            }
+            None => todo!("read from disk"),
+        }
+    }
+
+    /// Will potentially block if another thread is reading the page
+    pub fn get_page_write(&mut self, page_id: &PageId) -> RwLockWriteGuard<'_, Box<[u8]>> {
+        match self.page_table.get(page_id) {
+            Some(frame_id) => {
+                // NOTE: Look for race conditions here
+                let frame = self.get_frame_mut(*frame_id);
+                assert!(
+                    frame.page_metadata.is_some(),
+                    "Page with id={} is in the page table but not in the buffer pool",
+                    page_id,
+                );
+                // unwrap is safe because of the assert above
+                let metadata = frame.page_metadata.as_mut().unwrap();
+                metadata.is_dirty = true;
+                metadata.pin_count += 1;
+                frame.data.write().unwrap_or_else(PoisonError::into_inner)
+            }
+            None => {
+                let frame = self.load_page_from_disk(page_id);
+                frame.data.write().unwrap_or_else(PoisonError::into_inner)
+            }
+        }
+    }
+
+    fn load_page_from_disk(&mut self, page_id: &PageId) -> &Frame {
+        todo!("Call the scheduler and wait for it to finish")
+    }
+
+    pub fn get_frame_mut(&mut self, frame_id: FrameId) -> &mut Frame {
+        assert!(
+            frame_id < self.pool_size as FrameId,
+            "Frame id out of bounds",
+        );
+        self.frames
+            .get_mut(&frame_id)
+            .expect("Frame not found in buffer pool")
+    }
+
+    pub fn load_free_page(&mut self) {
+        // TODO: ask for table kind and look in the catalog
+        todo!()
+    }
+
+    /// Returns the number of frames in the buffer pool in O(n)
     pub fn len(&self) -> usize {
-        self.page_table.len()
+        self.frames
+            .iter()
+            .filter(|f| f.1.page_metadata.is_some())
+            .count()
+    }
+
+    pub fn free_list(&self) -> &Vec<FrameId> {
+        &self.free_list
     }
 }
 
-impl Default for BufferPool {
-    fn default() -> Self {
-        BufferPool::new(BUFFER_POOL_N_FRAMES)
-    }
-}
+// impl Default for BufferPool {
+//     fn default() -> Self {
+//         BufferPool::new(BUFFER_POOL_N_FRAMES)
+//     }
+// }
