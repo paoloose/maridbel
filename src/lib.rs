@@ -8,11 +8,11 @@ pub mod storage {
     mod tuple;
 
     pub mod disk {
-        pub mod manager;
-        pub mod scheduler;
+        pub mod disk_manager;
+        pub mod disk_scheduler;
     }
 
-    pub use disk::manager::DiskManager;
+    pub use disk::disk_manager::DiskManager;
     pub use page::{PageId, SlottedPage};
 }
 

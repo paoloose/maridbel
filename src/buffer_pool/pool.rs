@@ -114,9 +114,3 @@ impl<R: Read + Seek> BufferPool<R> {
         &self.free_list
     }
 }
-
-// impl Default for BufferPool {
-//     fn default() -> Self {
-//         BufferPool::new(BUFFER_POOL_N_FRAMES)
-//     }
-// }
