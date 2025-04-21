@@ -1,5 +1,8 @@
 use crate::{config::PAGE_SIZE, storage::tuple::Tuple};
 
+// TODO
+// - Representing null values
+
 /// 16bit offset + 16bit length
 const SLOTTED_PAGE_SLOT_SIZE: usize = 4;
 const SLOTTED_PAGE_HEADER_SIZE: usize = 0;

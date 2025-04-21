@@ -1,4 +1,6 @@
-// TODO: create some sort of "schema" type to interpret a raw tuple
+// TODO
+// - Create some sort of "schema" type to interpret raw tuples
+
 pub struct Tuple<'a> {
     data: &'a [u8],
 }
