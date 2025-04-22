@@ -12,19 +12,19 @@ pub mod storage {
         pub mod disk_scheduler;
     }
 
+    pub mod buffer {
+        pub mod buffer_pool;
+        mod frame;
+        mod lruk;
+    }
+
+    pub use buffer::buffer_pool::BufferPool;
     pub use disk::disk_manager::DiskManager;
     pub use page::{PageId, SlottedPage};
 }
 
 pub mod catalog {
     mod schema;
-}
-
-pub mod buffer_pool {
-    mod frame;
-    mod lruk;
-    mod pool;
-    pub use pool::BufferPool;
 }
 
 pub mod dbms {

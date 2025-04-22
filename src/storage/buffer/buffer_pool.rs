@@ -1,11 +1,10 @@
+use super::frame::{Frame, FrameId};
 use crate::config::PAGE_SIZE;
 use crate::storage::DiskManager;
 
 use std::collections::HashMap;
 use std::io::{Read, Seek};
 use std::sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard};
-
-use crate::buffer_pool::frame::{Frame, FrameId};
 
 /// For simplicity, the page id also represents the offset in the database file
 pub type PageId = u16;

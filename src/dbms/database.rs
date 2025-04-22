@@ -1,8 +1,8 @@
 use std::fs;
 use std::io::{Read, Seek};
 
-use crate::buffer_pool::BufferPool;
 use crate::config::BUFFER_POOL_N_FRAMES;
+use crate::storage::BufferPool;
 
 pub struct Database<R: Read + Seek> {
     /// The filename of the database file. None if the database is in memory.
