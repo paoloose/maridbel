@@ -1,9 +1,10 @@
 use std::{
+    io::{Read, Seek},
     sync::{Arc, Mutex},
     thread::spawn,
 };
 
-use crate::storage::PageId;
+use crate::storage::{DiskManager, PageId};
 
 enum QueueRequest {
     Read {
@@ -17,13 +18,15 @@ enum QueueRequest {
     },
 }
 
-pub struct DiskScheduler {
+pub struct DiskScheduler<R: Read + Seek> {
     requests_queue: Arc<Mutex<Vec<QueueRequest>>>,
+    disk_manager: DiskManager<R>,
 }
 
-impl DiskScheduler {
-    pub fn new() -> Self {
+impl<R: Read + Seek> DiskScheduler<R> {
+    pub fn new(reader: R) -> Self {
         let queue = Arc::new(Mutex::new(Vec::new()));
+        let disk_manager = DiskManager::new(reader);
 
         let moved_queue = queue.clone();
         std::thread::spawn(move || {
@@ -39,6 +42,7 @@ impl DiskScheduler {
         });
 
         DiskScheduler {
+            disk_manager,
             requests_queue: queue.clone(),
         }
     }

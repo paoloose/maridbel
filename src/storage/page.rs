@@ -3,6 +3,7 @@ use crate::{config::PAGE_SIZE, storage::tuple::Tuple};
 // TODO
 // - Representing null values
 
+/// For simplicity, the page id also represents the offset in the database file
 pub type PageId = u32;
 
 /// 16bit offset + 16bit length
