@@ -1,5 +1,6 @@
+use crate::config::PAGE_SIZE;
 use crate::storage::{DiskManager, PageId};
-use std::io::{Read, Seek, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex};
 use std::thread::{JoinHandle, Thread};
 use std::time::Duration;
@@ -48,10 +49,9 @@ impl<R: Read + Write + Seek> DiskScheduler<R> {
                         mut buffer,
                         thread,
                     }) => {
-                        let buffer = buffer.as_mut();
-                        for i in 0..buffer.len() {
-                            buffer[i] = 7_u8;
-                        }
+                        reader.seek(SeekFrom::Start(page_id_to_file_offset(page_id)));
+                        // let buffer = buffer.as_mut();
+                        // reader.read_exact(buffer);
                         thread.unpark();
                     }
                     Some(QueueRequest::Write {
@@ -98,4 +98,10 @@ impl<R: Read + Write + Seek> DiskScheduler<R> {
                 thread,
             });
     }
+}
+
+/* Utils */
+
+fn page_id_to_file_offset(id: PageId) -> u64 {
+    id as u64 * PAGE_SIZE as u64
 }

@@ -21,7 +21,8 @@ I'll remove this line of text until this project is in a usable state.
 - Are there any compression mechanisms for row oriented storage? (CMU #05)
 - Scan sharing: multiple queries attached to the same cursor (CMU #06)
 - Benchmark `parking_lot` equivalent sync primitives
+- Use concurrent hashmaps such as dashmap
 
-## TODO:
+## TODO
 
 - Move the responsability of opening the file to the disk manager
