@@ -1,10 +1,8 @@
-use std::{
-    io::{Read, Seek, Write},
-    sync::{Arc, Mutex},
-    thread::{spawn, JoinHandle, Thread},
-};
-
 use crate::storage::{DiskManager, PageId};
+use std::io::{Read, Seek, Write};
+use std::sync::{Arc, Mutex};
+use std::thread::{JoinHandle, Thread};
+use std::time::Duration;
 
 enum QueueRequest {
     Read {
@@ -36,18 +34,24 @@ impl<R: Read + Write + Seek> DiskScheduler<R> {
         let handle = std::thread::spawn(move || {
             let queue = moved_queue;
 
-            // TODO: how to send this read/write result?
-            //       start with reads, and writes should be easier
-            //       also, start to think where io_uring will fit here
+            // TODO: where io_uring will fit here
 
             loop {
-                let mut queue = queue.lock().unwrap();
-                match queue.pop() {
+                let maybe_request = {
+                    let mut queue = queue.lock().unwrap();
+                    queue.pop()
+                };
+
+                match maybe_request {
                     Some(QueueRequest::Read {
                         page_id,
-                        buffer,
+                        mut buffer,
                         thread,
                     }) => {
+                        let buffer = buffer.as_mut();
+                        for i in 0..buffer.len() {
+                            buffer[i] = 7_u8;
+                        }
                         thread.unpark();
                     }
                     Some(QueueRequest::Write {
@@ -55,9 +59,13 @@ impl<R: Read + Write + Seek> DiskScheduler<R> {
                         data,
                         thread,
                     }) => {
+                        println!("writing data");
                         thread.unpark();
                     }
-                    None => todo!(),
+                    None => {
+                        // No requests in the queue, sleep for a while
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
                 }
             }
         });
@@ -69,7 +77,7 @@ impl<R: Read + Write + Seek> DiskScheduler<R> {
         }
     }
 
-    pub fn schedule_read(&mut self, page_id: PageId, buffer: Box<[u8]>, thread: Thread) {
+    pub fn schedule_read(&self, page_id: PageId, buffer: Box<[u8]>, thread: Thread) {
         self.requests_queue
             .lock()
             .unwrap()

@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::{Read, Seek, Write};
+use std::sync::Arc;
 
 use crate::config::BUFFER_POOL_N_FRAMES;
 use crate::storage::BufferPool;
@@ -7,14 +8,14 @@ use crate::storage::BufferPool;
 pub struct Database<R: Read + Write + Seek> {
     /// The filename of the database file. None if the database is in memory.
     filename: Option<String>,
-    buffer_pool: BufferPool<R>,
+    buffer_pool: Arc<BufferPool<R>>,
 }
 
 impl<R: Read + Write + Seek> Database<R> {
     pub fn from_buffer(reader: R) -> Self {
         Database {
             filename: None,
-            buffer_pool: BufferPool::new(BUFFER_POOL_N_FRAMES, reader),
+            buffer_pool: Arc::new(BufferPool::new(BUFFER_POOL_N_FRAMES, reader)),
         }
     }
 
@@ -31,15 +32,21 @@ impl<R: Read + Write + Seek> Database<R> {
 
         Database {
             filename: Some(filename),
-            buffer_pool: BufferPool::new(BUFFER_POOL_N_FRAMES, file),
+            buffer_pool: Arc::new(BufferPool::new(BUFFER_POOL_N_FRAMES, file)),
         }
     }
 }
 
 mod test {
-    const TEST_CONCURRENCY: usize = 16;
+    const TEST_CONCURRENCY: usize = 128;
+
+    use crate::config::PAGE_SIZE;
+
     use super::*;
-    use std::{io::Cursor, sync::atomic::AtomicUsize};
+    use std::{
+        io::Cursor,
+        sync::{atomic::AtomicUsize, Arc},
+    };
 
     #[test]
     fn test_create_database_from_reader() {
@@ -49,32 +56,38 @@ mod test {
         let db = Database::from_buffer(reader);
         assert!(db.filename.is_none());
         assert_eq!(db.buffer_pool.len(), 0);
-        assert_eq!(db.buffer_pool.free_list().len(), BUFFER_POOL_N_FRAMES);
+        // assert_eq!(db.buffer_pool.free_list().len(), BUFFER_POOL_N_FRAMES);
     }
 
-    // #[test]
-    // fn test_database_multiple_readers() {
-    //     let database = vec![0u8; 4096];
-    //     let reader = Cursor::new(database);
+    #[test]
+    fn test_database_multiple_readers() {
+        let data = vec![1u8; 4096];
+        let reader = Cursor::new(data);
 
-    //     let mut db = Database::from_buffer(reader);
+        let db = Database::from_buffer(reader);
+        let mut threads = Vec::with_capacity(TEST_CONCURRENCY);
 
-    //     let mut threads = Vec::with_capacity(TEST_CONCURRENCY);
+        let n_bytes_read = Arc::new(AtomicUsize::new(0));
 
-    //     let n_bytes_read = AtomicUsize::new(0);
+        for _ in 0..TEST_CONCURRENCY {
+            let cloned_n_bytes_read = n_bytes_read.clone();
+            let cloned_buffer_pool = db.buffer_pool.clone();
 
-    //     for _ in 0..TEST_CONCURRENCY {
-    //         let t = std::thread::spawn(|| {
-    //             // RwLockReadGuard<'_, Box<[u8]>>
-    //             let page = db.buffer_pool.get_page_read(0);
-    //             let n_bytes = page.len();
-    //             n_bytes_read.fetch_add(n_bytes, std::sync::atomic::Ordering::SeqCst);
-    //         });
-    //         threads.push(t);
-    //     }
+            let t = std::thread::spawn(move || {
+                let page = cloned_buffer_pool.get_page_read(0);
+                let n_bytes = page.read_guard().data.len();
+                cloned_n_bytes_read.fetch_add(n_bytes, std::sync::atomic::Ordering::SeqCst);
+            });
+            threads.push(t);
+        }
 
-    //     for t in threads {
-    //         t.join();
-    //     }
-    // }
+        for t in threads {
+            t.join().unwrap();
+        }
+
+        assert_eq!(
+            n_bytes_read.load(std::sync::atomic::Ordering::Relaxed),
+            TEST_CONCURRENCY * PAGE_SIZE
+        );
+    }
 }

@@ -1,19 +1,10 @@
-use std::{
-    rc::Rc,
-    sync::{PoisonError, RwLock, RwLockWriteGuard},
-};
+use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// The Buffer Pool frame id for internal use only. It is not associated with the page id.
 pub type FrameId = u16;
 
-pub struct PageMetadata {
-    /// How many threads are accessing this page. A page can only be evicted if pin_count is 0.
-    pub pin_count: u32,
-    pub is_dirty: bool,
-}
-
 pub struct Frame {
-    /// If a page is loaded, it will contain the Page metadata
+    /// How many threads are accessing this page. A page can only be evicted if pin_count is 0.
     pub pin_count: u32,
     pub is_dirty: bool,
     /// Heap allocated frame of size PAGE_SIZE.
@@ -26,23 +17,37 @@ impl Frame {
         Frame {
             pin_count: 0,
             is_dirty: false,
-            data: data,
+            data,
         }
     }
 }
 
 /// Wrapper for a RwLockReadGuard that decrements the frame pin count
-pub struct PageReadGuard<'a> {
-    frame: &'a Frame,
+pub struct PageReadGuard {
+    frame: Arc<RwLock<Frame>>,
+}
+
+impl PageReadGuard {
+    pub fn new(frame: Arc<RwLock<Frame>>) -> Self {
+        {
+            let mut frame = frame.write().unwrap_or_else(PoisonError::into_inner);
+            frame.pin_count += 1;
+        }
+        PageReadGuard { frame }
+    }
+
+    pub fn read_guard(&self) -> RwLockReadGuard<'_, Frame> {
+        self.frame.read().unwrap()
+    }
 }
 
 /// Wrapper for a RwLockWriteGuard that decrements the frame pin count
 pub struct PageWriteGuard {
-    frame: Rc<RwLock<Frame>>,
+    frame: Arc<RwLock<Frame>>,
 }
 
 impl PageWriteGuard {
-    pub fn new(frame: Rc<RwLock<Frame>>) -> Self {
+    pub fn new(frame: Arc<RwLock<Frame>>) -> Self {
         {
             let mut frame = frame.write().unwrap_or_else(PoisonError::into_inner);
             frame.pin_count += 1;
