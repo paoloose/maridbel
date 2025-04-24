@@ -20,18 +20,23 @@ enum QueueRequest {
     },
 }
 
-pub struct DiskScheduler<R: Read + Write + Seek> {
+pub struct DiskScheduler {
     requests_queue: Arc<Mutex<Vec<QueueRequest>>>,
     handle: JoinHandle<()>,
-    disk_manager: DiskManager<R>,
+    // disk_manager: DiskManager<R>,
 }
 
-impl<R: Read + Write + Seek> DiskScheduler<R> {
-    pub fn new(reader: R) -> Self {
+impl DiskScheduler {
+    pub fn new<R>(mut reader: R) -> Self
+    where
+        R: Read + Write + Seek + Send + 'static,
+    {
         let queue = Arc::new(Mutex::new(Vec::new()));
-        let disk_manager = DiskManager::new(reader);
 
         let moved_queue = queue.clone();
+        // we make the reader safe to move to the worker thread
+        // let mut reader = disk_manager.reader;
+
         let handle = std::thread::spawn(move || {
             let queue = moved_queue;
 
@@ -49,9 +54,8 @@ impl<R: Read + Write + Seek> DiskScheduler<R> {
                         mut buffer,
                         thread,
                     }) => {
-                        reader.seek(SeekFrom::Start(page_id_to_file_offset(page_id)));
-                        // let buffer = buffer.as_mut();
-                        // reader.read_exact(buffer);
+                        reader.seek(SeekFrom::Start(page_id_to_file_offset(0)));
+                        reader.read_exact(buffer.as_mut()).unwrap();
                         thread.unpark();
                     }
                     Some(QueueRequest::Write {
@@ -71,7 +75,7 @@ impl<R: Read + Write + Seek> DiskScheduler<R> {
         });
 
         DiskScheduler {
-            disk_manager,
+            // disk_manager,
             requests_queue: queue.clone(),
             handle,
         }

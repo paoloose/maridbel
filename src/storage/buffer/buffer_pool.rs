@@ -12,7 +12,7 @@ use std::thread;
 ///
 /// - Data locality: a page only stores tuples that are in the same table.
 /// - Simplicity: no page directory is neede because page ids represent offsets in the DB file.
-pub struct BufferPool<R: Read + Write + Seek> {
+pub struct BufferPool {
     /// The size of the buffer pool in number of frames
     pool_size: usize,
     /// Stores the metadata of the pages in the buffer pool
@@ -23,12 +23,15 @@ pub struct BufferPool<R: Read + Write + Seek> {
     page_table: Arc<RwLock<HashMap<PageId, FrameId>>>,
     /// The list of available frames for allocation. Getting a free frame is O(1).
     free_list: Arc<RwLock<Vec<FrameId>>>,
-    disk_scheduler: DiskScheduler<R>,
+    disk_scheduler: DiskScheduler,
 }
 
-impl<R: Read + Write + Seek> BufferPool<R> {
+impl BufferPool {
     /// Creates a new buffer pool manager with the given size
-    pub fn new(pool_size: usize, reader: R) -> Self {
+    pub fn new<R>(pool_size: usize, reader: R) -> Self
+    where
+        R: Read + Write + Seek + Send + 'static,
+    {
         let mut frames = Vec::with_capacity(pool_size);
         let page_table = HashMap::with_capacity(pool_size);
 
@@ -158,16 +161,13 @@ impl<R: Read + Write + Seek> BufferPool<R> {
 
         println!("Parking thread waiting for page id={page_id} to be read");
         thread::park();
+
+        // TODO: SHOULD BE 7_u8 7_u8 7_u8 7_u8
+        println!("Printing the frame byte by byte");
+        for byte in writable_frame.data.iter() {
+            print!("{byte} ");
+        }
     }
-
-    // fn get_free_frame(&mut self) -> Rc<RwLockWriteGuard<'_, Frame>> {}
-
-    // pub fn get_frame_mut(&mut self, frame_id: FrameId) -> &mut Frame {
-
-    //     frames
-    //         .get_mut(&frame_id)
-    //         .expect("Frame not found in buffer pool")
-    // }
 
     pub fn load_free_page(&mut self) {
         // TODO: ask for table kind and look in the catalog

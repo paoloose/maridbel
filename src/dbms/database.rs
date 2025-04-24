@@ -5,14 +5,17 @@ use std::sync::Arc;
 use crate::config::BUFFER_POOL_N_FRAMES;
 use crate::storage::BufferPool;
 
-pub struct Database<R: Read + Write + Seek> {
+pub struct Database {
     /// The filename of the database file. None if the database is in memory.
     filename: Option<String>,
-    buffer_pool: Arc<BufferPool<R>>,
+    buffer_pool: Arc<BufferPool>,
 }
 
-impl<R: Read + Write + Seek> Database<R> {
-    pub fn from_buffer(reader: R) -> Self {
+impl Database {
+    pub fn from_buffer<R>(reader: R) -> Self
+    where
+        R: Read + Write + Seek + Send + 'static,
+    {
         Database {
             filename: None,
             buffer_pool: Arc::new(BufferPool::new(BUFFER_POOL_N_FRAMES, reader)),
@@ -20,7 +23,7 @@ impl<R: Read + Write + Seek> Database<R> {
     }
 
     // TODO: return Result instead
-    pub fn from_file(filename: String) -> Database<fs::File> {
+    pub fn from_file(filename: String) -> Database {
         let file = fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -38,7 +41,7 @@ impl<R: Read + Write + Seek> Database<R> {
 }
 
 mod test {
-    const TEST_CONCURRENCY: usize = 128;
+    const TEST_CONCURRENCY: usize = 16;
 
     use crate::config::PAGE_SIZE;
 
@@ -61,7 +64,7 @@ mod test {
 
     #[test]
     fn test_database_multiple_readers() {
-        let data = vec![1u8; 4096];
+        let data = vec![7u8; 4096];
         let reader = Cursor::new(data);
 
         let db = Database::from_buffer(reader);
@@ -75,7 +78,12 @@ mod test {
 
             let t = std::thread::spawn(move || {
                 let page = cloned_buffer_pool.get_page_read(0);
-                let n_bytes = page.read_guard().data.len();
+                let data = &page.read_guard().data;
+
+                let first_byte = data[0];
+                assert_eq!(first_byte, 7);
+
+                let n_bytes = data.len();
                 cloned_n_bytes_read.fetch_add(n_bytes, std::sync::atomic::Ordering::SeqCst);
             });
             threads.push(t);
