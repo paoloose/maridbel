@@ -53,6 +53,7 @@ impl BufferPool {
         }
     }
 
+    // TODO: Read CMU code
     pub fn get_page_read(&self, page_id: PageId) -> PageReadGuard {
         let maybe_frame_id = {
             // TODO: should this remain blocked? or should we release de lock inmediatly
@@ -153,20 +154,20 @@ impl BufferPool {
             .get(frame_id as usize)
             .expect(format!("Frame id={frame_id} out of bounds").as_str());
 
-        let writable_frame = frame.write().unwrap();
-        let buffer = writable_frame.data.clone();
-
         self.disk_scheduler
-            .schedule_read(page_id, buffer, thread::current());
+            .schedule_read(page_id, frame.clone(), thread::current());
 
         println!("Parking thread waiting for page id={page_id} to be read");
         thread::park();
 
         // TODO: SHOULD BE 7_u8 7_u8 7_u8 7_u8
-        println!("Printing the frame byte by byte");
-        for byte in writable_frame.data.iter() {
-            print!("{byte} ");
-        }
+        println!(
+            "🌟 Done. First byte is {}",
+            frame.read().unwrap().data.first().unwrap()
+        );
+        // for byte in frame.read().unwrap().data.iter() {
+        //     print!("{byte} ");
+        // }
     }
 
     pub fn load_free_page(&mut self) {

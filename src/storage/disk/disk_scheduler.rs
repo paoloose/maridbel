@@ -1,14 +1,14 @@
 use crate::config::PAGE_SIZE;
-use crate::storage::{DiskManager, PageId};
+use crate::storage::{DiskManager, Frame, PageId};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{JoinHandle, Thread};
 use std::time::Duration;
 
 enum QueueRequest {
     Read {
         page_id: PageId,
-        buffer: Box<[u8]>,
+        buffer: Arc<RwLock<Frame>>,
         thread: Thread,
         // callback: Box<dyn FnOnce()>,
     },
@@ -32,10 +32,7 @@ impl DiskScheduler {
         R: Read + Write + Seek + Send + 'static,
     {
         let queue = Arc::new(Mutex::new(Vec::new()));
-
         let moved_queue = queue.clone();
-        // we make the reader safe to move to the worker thread
-        // let mut reader = disk_manager.reader;
 
         let handle = std::thread::spawn(move || {
             let queue = moved_queue;
@@ -54,8 +51,11 @@ impl DiskScheduler {
                         mut buffer,
                         thread,
                     }) => {
-                        reader.seek(SeekFrom::Start(page_id_to_file_offset(0)));
-                        reader.read_exact(buffer.as_mut()).unwrap();
+                        reader
+                            .seek(SeekFrom::Start(page_id_to_file_offset(page_id)))
+                            .unwrap();
+                        let mut buffer = buffer.write().unwrap();
+                        reader.read_exact(&mut buffer.data).unwrap();
                         thread.unpark();
                     }
                     Some(QueueRequest::Write {
@@ -81,7 +81,7 @@ impl DiskScheduler {
         }
     }
 
-    pub fn schedule_read(&self, page_id: PageId, buffer: Box<[u8]>, thread: Thread) {
+    pub fn schedule_read(&self, page_id: PageId, buffer: Arc<RwLock<Frame>>, thread: Thread) {
         self.requests_queue
             .lock()
             .unwrap()

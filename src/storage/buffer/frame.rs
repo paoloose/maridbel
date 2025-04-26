@@ -36,7 +36,7 @@ impl PageReadGuard {
         PageReadGuard { frame }
     }
 
-    pub fn read_guard(&self) -> RwLockReadGuard<'_, Frame> {
+    pub fn read(&self) -> RwLockReadGuard<'_, Frame> {
         self.frame.read().unwrap()
     }
 }
@@ -56,7 +56,7 @@ impl PageWriteGuard {
         PageWriteGuard { frame }
     }
 
-    pub fn write_guard(&self) -> RwLockWriteGuard<Frame> {
+    pub fn write(&self) -> RwLockWriteGuard<Frame> {
         self.frame.write().unwrap()
     }
 }

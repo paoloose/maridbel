@@ -14,11 +14,12 @@ pub mod storage {
 
     pub mod buffer {
         pub mod buffer_pool;
-        mod frame;
+        pub mod frame;
         mod lruk;
     }
 
     pub use buffer::buffer_pool::BufferPool;
+    pub use buffer::frame::Frame;
     pub use disk::disk_manager::DiskManager;
     pub use page::{PageId, SlottedPage};
 }
