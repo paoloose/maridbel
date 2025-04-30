@@ -2,7 +2,7 @@ use crate::config::PAGE_SIZE;
 use crate::storage::{DiskManager, Frame, PageId};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex, RwLock};
-use std::thread::{JoinHandle, Thread};
+use std::thread::{self, JoinHandle, Thread};
 use std::time::Duration;
 
 enum QueueRequest {

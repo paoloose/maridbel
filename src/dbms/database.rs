@@ -41,7 +41,7 @@ impl Database {
 }
 
 mod test {
-    const TEST_CONCURRENCY: usize = 2;
+    const TEST_CONCURRENCY: usize = 24;
 
     use crate::config::PAGE_SIZE;
 
@@ -53,7 +53,7 @@ mod test {
 
     #[test]
     fn test_create_database_from_reader() {
-        let database = vec![0u8; 4096];
+        let database = vec![0u8; PAGE_SIZE];
         let reader = Cursor::new(database);
 
         let db = Database::from_buffer(reader);
@@ -64,7 +64,7 @@ mod test {
 
     #[test]
     fn test_database_multiple_readers() {
-        let data = vec![7u8; 4096];
+        let data = vec![7u8; PAGE_SIZE];
         let reader = Cursor::new(data);
 
         let db = Database::from_buffer(reader);
@@ -80,9 +80,8 @@ mod test {
                 let page = cloned_buffer_pool.get_page_read(0);
                 let data = &page.read().data;
 
-                let first_byte = data[0];
-                // assert_eq!(first_byte, 7);
-                println!("First byte: {first_byte}");
+                assert_eq!(data[0], 7);
+                assert_eq!(data.last(), Some(&7));
 
                 let n_bytes = data.len();
                 cloned_n_bytes_read.fetch_add(n_bytes, std::sync::atomic::Ordering::SeqCst);
@@ -98,6 +97,6 @@ mod test {
             n_bytes_read.load(std::sync::atomic::Ordering::Relaxed),
             TEST_CONCURRENCY * PAGE_SIZE
         );
-        // assert_eq!(db.buffer_pool.len(), 1,);
+        assert_eq!(db.buffer_pool.len(), 1,);
     }
 }

@@ -55,14 +55,15 @@ impl BufferPool {
 
     // TODO: Read CMU code
     pub fn get_page_read(&self, page_id: PageId) -> PageReadGuard {
-        let maybe_frame_id = {
-            // TODO: should this remain blocked? or should we release de lock inmediatly
-            let page_table = self.page_table.read().expect("page table was poisoned");
-            page_table.get(&page_id).cloned()
-        };
+        // We acquire exclusive lock over the page because we may potentially write to
+        // the table in the "None" branch
+        let mut page_table = self.page_table.write().expect("page table was poisoned");
+        let maybe_frame_id = page_table.get(&page_id).cloned();
 
         match maybe_frame_id {
             Some(frame_id) => {
+                // We are not writing to the page table so release the lock inmediatly.
+                drop(page_table);
                 println!("Found page_id={page_id} in frame_id={frame_id}");
                 assert!(
                     frame_id < self.pool_size as FrameId,
@@ -83,10 +84,7 @@ impl BufferPool {
                     .pop()
                     .expect("No free frame found. You better work in your eviction algorithm");
 
-                self.page_table
-                    .write()
-                    .unwrap()
-                    .insert(page_id, free_frame_id);
+                page_table.insert(page_id, free_frame_id);
 
                 println!("Found empty frame frame_id={free_frame_id}. Loading page id={page_id}");
                 self.load_page_from_disk(page_id, free_frame_id);
@@ -107,11 +105,10 @@ impl BufferPool {
     /// If no free frame is available, it will ask the replacer to evict a frame.
     /// If no frame can be evicted, it will block until a frame is available.
     pub fn get_page_write(&mut self, page_id: PageId) -> PageWriteGuard {
-        let maybe_frame_id = {
-            // TODO: should this remain blocked? or should we release de lock inmediatly
-            let page_table = self.page_table.read().expect("page table was poisoned");
-            page_table.get(&page_id).cloned()
-        };
+        // We acquire exclusive lock over the page because we may potentially write to
+        // the table in the "None" branch
+        let page_table = self.page_table.write().expect("page table was poisoned");
+        let maybe_frame_id = page_table.get(&page_id).cloned();
 
         match maybe_frame_id {
             Some(frame_id) => {
