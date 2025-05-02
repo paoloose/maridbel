@@ -67,3 +67,10 @@ impl Drop for PageWriteGuard {
         frame.pin_count -= 1;
     }
 }
+
+impl Drop for PageReadGuard {
+    fn drop(&mut self) {
+        let mut frame = self.frame.write().unwrap_or_else(PoisonError::into_inner);
+        frame.pin_count -= 1;
+    }
+}
