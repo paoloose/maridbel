@@ -10,6 +10,8 @@ pub type PageId = u32;
 const SLOTTED_PAGE_SLOT_SIZE: usize = 4;
 const SLOTTED_PAGE_HEADER_SIZE: usize = 0;
 
+pub const THE_EMPTY_PAGE: [u8; PAGE_SIZE] = [0; PAGE_SIZE];
+
 pub struct SlottedPage<'a> {
     // slice of bytes representing the page
     data: &'a mut [u8; PAGE_SIZE],

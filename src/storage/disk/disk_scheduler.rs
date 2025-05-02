@@ -1,8 +1,10 @@
 use crate::config::PAGE_SIZE;
-use crate::storage::{DiskManager, Frame, PageId};
+use crate::storage::page::THE_EMPTY_PAGE;
+use crate::storage::{Frame, PageId};
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::panic;
 use std::sync::{Arc, Mutex, RwLock};
-use std::thread::{self, JoinHandle, Thread};
+use std::thread::{JoinHandle, Thread};
 use std::time::Duration;
 
 enum QueueRequest {
@@ -35,6 +37,13 @@ impl DiskScheduler {
         let moved_queue = queue.clone();
 
         let handle = std::thread::spawn(move || {
+            let hook = panic::take_hook();
+            panic::set_hook(Box::new(move |info| {
+                hook(info);
+                println!("Disk scheduler thread panicked: {:#?}", info);
+                panic!();
+            }));
+
             let queue = moved_queue;
 
             // TODO: where io_uring will fit here
@@ -48,23 +57,37 @@ impl DiskScheduler {
                 match maybe_request {
                     Some(QueueRequest::Read {
                         page_id,
-                        mut buffer,
+                        buffer,
                         thread,
                     }) => {
                         reader
                             .seek(SeekFrom::Start(page_id_to_file_offset(page_id)))
                             .unwrap();
-                        let mut buffer = buffer.write().unwrap();
-                        reader.read_exact(&mut buffer.data).unwrap();
-                        thread.unpark();
+
+                        let mut buffer = buffer.write().expect("could not lock buffer for reading");
+                        match reader.read_exact(&mut buffer.data) {
+                            Ok(_) => {
+                                thread.unpark();
+                            }
+                            // catch eof
+                            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                                reader.write_all(&THE_EMPTY_PAGE).unwrap();
+                                buffer.data.copy_from_slice(&THE_EMPTY_PAGE);
+                                thread.unpark();
+                            }
+                            Err(e) => {
+                                println!("Error reading from disk: {e}");
+                            }
+                        }
                     }
                     Some(QueueRequest::Write {
                         page_id,
                         data,
-                        thread,
+                        thread: _,
                     }) => {
-                        println!("writing data");
-                        thread.unpark();
+                        println!("writing data {data:?} into page_id={page_id}");
+                        todo!("writing not implemented");
+                        // thread.unpark();
                     }
                     None => {
                         // No requests in the queue, sleep for a while
@@ -75,13 +98,16 @@ impl DiskScheduler {
         });
 
         DiskScheduler {
-            // disk_manager,
+            // disk_manager, // TODO: move this manager here, or go without it
             requests_queue: queue.clone(),
             handle,
         }
     }
 
     pub fn schedule_read(&self, page_id: PageId, buffer: Arc<RwLock<Frame>>, thread: Thread) {
+        if self.handle.is_finished() {
+            panic!("Disk scheduler thread has finished");
+        }
         self.requests_queue
             .lock()
             .unwrap()
@@ -93,6 +119,9 @@ impl DiskScheduler {
     }
 
     pub fn schedule_write(&mut self, page_id: PageId, data: Box<[u8]>, thread: Thread) {
+        if self.handle.is_finished() {
+            panic!("Disk scheduler thread has finished");
+        }
         self.requests_queue
             .lock()
             .unwrap()
