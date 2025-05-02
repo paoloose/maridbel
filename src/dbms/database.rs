@@ -41,15 +41,12 @@ impl Database {
 }
 
 mod test {
-    const TEST_CONCURRENCY: usize = 24;
-
-    use crate::config::PAGE_SIZE;
-
     use super::*;
-    use std::{
-        io::Cursor,
-        sync::{atomic::AtomicUsize, Arc},
-    };
+    use crate::config::PAGE_SIZE;
+    use std::io::Cursor;
+    use std::sync::{atomic::AtomicUsize, Arc};
+
+    const TEST_CONCURRENCY: usize = 24;
 
     #[test]
     fn test_create_database_from_reader() {
@@ -97,6 +94,36 @@ mod test {
             n_bytes_read.load(std::sync::atomic::Ordering::Relaxed),
             TEST_CONCURRENCY * PAGE_SIZE
         );
-        assert_eq!(db.buffer_pool.len(), 1,);
+        assert_eq!(db.buffer_pool.len(), 1);
+    }
+
+    #[test]
+    fn test_database_multiple_writers_and_reader() {
+        let data = vec![]; // empty database
+        let reader = Cursor::new(data);
+
+        let db = Database::from_buffer(reader);
+        let mut threads = Vec::with_capacity(TEST_CONCURRENCY);
+
+        for i in 0..TEST_CONCURRENCY {
+            let cloned_buffer_pool = db.buffer_pool.clone();
+
+            let t = std::thread::spawn(move || {
+                let page = cloned_buffer_pool.get_page_write(0);
+                page.write().data = vec![i as u8; PAGE_SIZE].into();
+            });
+            threads.push(t);
+        }
+
+        for t in threads {
+            t.join().unwrap();
+        }
+
+        assert_eq!(db.buffer_pool.len(), 1);
+        let page = db.buffer_pool.get_page_read(0);
+        let data = &page.read().data;
+        let first_byte = data[0];
+        // the same first byte should be written in all the page
+        assert_eq!(data[..], vec![first_byte; PAGE_SIZE]);
     }
 }
