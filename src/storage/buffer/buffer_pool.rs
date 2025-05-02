@@ -107,11 +107,13 @@ impl BufferPool {
     pub fn get_page_write(&self, page_id: PageId) -> PageWriteGuard {
         // We acquire exclusive lock over the page because we may potentially write to
         // the table in the "None" branch
-        let page_table = self.page_table.write().expect("page table was poisoned");
+        let mut page_table = self.page_table.write().expect("page table was poisoned");
         let maybe_frame_id = page_table.get(&page_id).cloned();
 
         match maybe_frame_id {
             Some(frame_id) => {
+                // We are not writing to the page table so release the lock inmediatly.
+                drop(page_table);
                 assert!(
                     frame_id < self.pool_size as FrameId,
                     "Frame id out of bounds",
@@ -131,6 +133,7 @@ impl BufferPool {
                     .unwrap()
                     .pop()
                     .expect("No free frame found. You better work in your eviction algorithm");
+                page_table.insert(page_id, free_frame_id);
 
                 self.load_page_from_disk(page_id, free_frame_id);
 
