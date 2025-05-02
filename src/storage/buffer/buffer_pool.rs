@@ -104,7 +104,7 @@ impl BufferPool {
     /// Returns a write (exclusive) guard for a frame, efectively pinning it.
     /// If no free frame is available, it will ask the replacer to evict a frame.
     /// If no frame can be evicted, it will block until a frame is available.
-    pub fn get_page_write(&mut self, page_id: PageId) -> PageWriteGuard {
+    pub fn get_page_write(&self, page_id: PageId) -> PageWriteGuard {
         // We acquire exclusive lock over the page because we may potentially write to
         // the table in the "None" branch
         let page_table = self.page_table.write().expect("page table was poisoned");
@@ -174,11 +174,6 @@ impl BufferPool {
 
     /// Returns the number of allocated frames in the buffer pool in O(n)
     pub fn len(&self) -> usize {
-        self.frames
-            .read()
-            .unwrap()
-            .iter()
-            .filter(|f| f.read().unwrap().pin_count > 0)
-            .count()
+        self.page_table.read().unwrap().len()
     }
 }
