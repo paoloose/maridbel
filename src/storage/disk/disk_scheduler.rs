@@ -118,7 +118,7 @@ impl DiskScheduler {
             });
     }
 
-    pub fn schedule_write(&mut self, page_id: PageId, data: Box<[u8]>, thread: Thread) {
+    pub fn schedule_write(&self, page_id: PageId, data: Box<[u8]>, thread: Thread) {
         if self.handle.is_finished() {
             panic!("Disk scheduler thread has finished");
         }
