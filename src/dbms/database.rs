@@ -12,18 +12,18 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn from_buffer<R>(reader: R) -> Self
+    pub fn from_buffer<R>(reader: R, config: DatabaseConfig) -> Self
     where
         R: Read + Write + Seek + Send + 'static,
     {
         Database {
             filename: None,
-            buffer_pool: Arc::new(BufferPool::new(BUFFER_POOL_N_FRAMES, reader)),
+            buffer_pool: Arc::new(BufferPool::new(config.buffer_pool_size, reader)),
         }
     }
 
     // TODO: return Result instead
-    pub fn from_file(filename: String) -> Database {
+    pub fn from_file(filename: String, config: DatabaseConfig) -> Database {
         let file = fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -35,7 +35,19 @@ impl Database {
 
         Database {
             filename: Some(filename),
-            buffer_pool: Arc::new(BufferPool::new(BUFFER_POOL_N_FRAMES, file)),
+            buffer_pool: Arc::new(BufferPool::new(config.buffer_pool_size, file)),
+        }
+    }
+}
+
+pub struct DatabaseConfig {
+    buffer_pool_size: usize,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        DatabaseConfig {
+            buffer_pool_size: BUFFER_POOL_N_FRAMES,
         }
     }
 }
@@ -53,10 +65,9 @@ mod test {
         let database = vec![0u8; PAGE_SIZE];
         let reader = Cursor::new(database);
 
-        let db = Database::from_buffer(reader);
+        let db = Database::from_buffer(reader, DatabaseConfig::default());
         assert!(db.filename.is_none());
         assert_eq!(db.buffer_pool.len(), 0);
-        // assert_eq!(db.buffer_pool.free_list().len(), BUFFER_POOL_N_FRAMES);
     }
 
     #[test]
@@ -64,7 +75,7 @@ mod test {
         let data = vec![7u8; PAGE_SIZE];
         let reader = Cursor::new(data);
 
-        let db = Database::from_buffer(reader);
+        let db = Database::from_buffer(reader, DatabaseConfig::default());
         let mut threads = Vec::with_capacity(TEST_CONCURRENCY);
 
         let n_bytes_read = Arc::new(AtomicUsize::new(0));
@@ -102,7 +113,7 @@ mod test {
         let data = vec![]; // empty database
         let reader = Cursor::new(data);
 
-        let db = Database::from_buffer(reader);
+        let db = Database::from_buffer(reader, DatabaseConfig::default());
         let mut threads = Vec::with_capacity(TEST_CONCURRENCY);
 
         for i in 0..TEST_CONCURRENCY {
