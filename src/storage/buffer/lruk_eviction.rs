@@ -17,7 +17,7 @@ pub struct LRUKEvictionPolicy {
     /// The number of historical accesses to track.
     k: usize,
     /// The frames that are currently in the buffer pool.
-    frames: Arc<RwLock<HashMap<FrameId, LRUKNode>>>,
+    nodes_store: Arc<RwLock<HashMap<FrameId, LRUKNode>>>,
     /// An incremental counters that tracks the current timestamp starting from 0.
     current_timestamp: Arc<AtomicU64>,
 }
@@ -30,14 +30,14 @@ impl LRUKEvictionPolicy {
         LRUKEvictionPolicy {
             k,
             current_timestamp: Arc::new(AtomicU64::new(0)),
-            frames: Arc::new(RwLock::new(frames)),
+            nodes_store: Arc::new(RwLock::new(frames)),
         }
     }
 
     #[allow(unused)]
     /// The number of frames that can be evicted
     pub fn size(&self) -> usize {
-        let frames = self.frames.read().unwrap();
+        let frames = self.nodes_store.read().unwrap();
         frames.iter().filter(|(_, node)| node.is_evictable).count()
     }
 
@@ -51,7 +51,7 @@ impl LRUKEvictionPolicy {
 
     #[allow(unused)]
     fn debug_dump(&self) {
-        let frames = self.frames.read().unwrap();
+        let frames = self.nodes_store.read().unwrap();
         println!("Current timestamp: {}", self.get_timestamp());
         for (frame_id, node) in frames.iter() {
             println!(
@@ -78,7 +78,7 @@ impl EvictionPolicy for LRUKEvictionPolicy {
         let mut least_recent_access = 0_u64;
         let mut max_backward_distance = 0_u64;
 
-        for frame in self.frames.read().unwrap().values() {
+        for frame in self.nodes_store.read().unwrap().values() {
             assert!(!frame.history.is_empty() && frame.history.len() <= self.k);
 
             if !frame.is_evictable {
@@ -109,7 +109,7 @@ impl EvictionPolicy for LRUKEvictionPolicy {
 
         match frame_to_evict {
             Some(frame_id) => {
-                self.frames.write().unwrap().remove(&frame_id);
+                self.nodes_store.write().unwrap().remove(&frame_id);
                 Some(frame_id)
             }
             _ => None,
@@ -124,7 +124,7 @@ impl EvictionPolicy for LRUKEvictionPolicy {
     fn record_access(&self, frame_id: FrameId, _access_type: AccessType) {
         let now = self.next_timestamp();
 
-        let mut frames = self.frames.write().unwrap();
+        let mut frames = self.nodes_store.write().unwrap();
 
         let node = frames.entry(frame_id).or_insert(LRUKNode {
             frame_id,
@@ -140,11 +140,16 @@ impl EvictionPolicy for LRUKEvictionPolicy {
 
     /// Whether the frame is evictable or not. Panics if the frame is not found.
     fn set_evictable(&self, frame_id: FrameId, is_evictable: bool) {
-        let mut frames = self.frames.write().unwrap();
+        let mut frames = self.nodes_store.write().unwrap();
         let node = frames
             .get_mut(&frame_id)
             .unwrap_or_else(|| panic!("set_evictable: Frame with frame_id={} not found", frame_id));
         node.is_evictable = is_evictable;
+    }
+
+    fn remove(&self, frame_id: FrameId) {
+        let mut frames = self.nodes_store.write().unwrap();
+        frames.remove(&frame_id);
     }
 }
 

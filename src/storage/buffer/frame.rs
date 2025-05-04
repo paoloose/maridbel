@@ -1,12 +1,15 @@
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::eviction::EvictionPolicy;
+use crate::storage::PageId;
 
 /// The Buffer Pool frame id for internal use only. It is not associated with the page id.
 pub type FrameId = u16;
 
+#[derive(Debug)]
 pub struct Frame {
     /// How many threads are accessing this page. A page can only be evicted if pin_count is 0.
+    pub page_id: Option<PageId>,
     pub pin_count: u32,
     pub is_dirty: bool,
     /// Heap allocated frame of size PAGE_SIZE.
@@ -18,6 +21,7 @@ impl Frame {
     pub fn new(data: Box<[u8]>) -> Self {
         Frame {
             pin_count: 0,
+            page_id: None,
             is_dirty: false,
             data,
         }

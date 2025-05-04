@@ -149,26 +149,46 @@ impl BufferPool {
             .get(frame_id as usize)
             .unwrap_or_else(|| panic!("Frame id={frame_id} out of bounds"));
 
+        {
+            frame.write().unwrap().page_id = Some(page_id);
+        }
+
         self.disk_scheduler
             .schedule_read(page_id, frame.clone(), thread::current());
 
         println!("Parking thread waiting for page id={page_id} to be read");
         thread::park();
-
-        // TODO: SHOULD BE 7_u8 7_u8 7_u8 7_u8
-        println!(
-            "🌟 Done. First byte is {}",
-            frame.read().unwrap().data.first().unwrap()
-        );
-        // for byte in frame.read().unwrap().data.iter() {
-        //     print!("{byte} ");
-        // }
     }
 
     fn try_get_free_frane(&self) -> Option<FrameId> {
         match self.free_list.write().unwrap().pop() {
-            Some(free_frame_id) => Some(free_frame_id),
-            _ => self.eviction_policy.evict(),
+            Some(free_frame_id) => return Some(free_frame_id),
+            _ => {}
+        };
+
+        match self.eviction_policy.evict() {
+            Some(evicted_frame_id) => {
+                let evicted_frame_lock = self
+                    .frames
+                    .get(evicted_frame_id as usize)
+                    .unwrap_or_else(|| panic!("Frame id={evicted_frame_id} out of bounds"));
+
+                let mut evicted_frame = evicted_frame_lock.write().unwrap();
+                evicted_frame.page_id = None;
+                // remove this in release
+                assert!(evicted_frame.pin_count == 0);
+
+                if evicted_frame.is_dirty {
+                    self.disk_scheduler.schedule_write(
+                        evicted_frame.page_id.unwrap(),
+                        evicted_frame_lock.clone(),
+                        thread::current(),
+                    );
+                    self.eviction_policy.remove(evicted_frame_id);
+                }
+                Some(evicted_frame_id)
+            }
+            _ => None,
         }
     }
 
@@ -186,3 +206,7 @@ impl BufferPool {
         self.len() == 0
     }
 }
+
+// TODO: write buffer pool tests
+// TODO: Continue busy looping for that failing test
+//       while RUST_BACKTRACE=full cargo test -- --nocapture; do false; done

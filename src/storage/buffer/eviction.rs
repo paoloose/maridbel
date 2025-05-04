@@ -13,4 +13,6 @@ pub trait EvictionPolicy {
     fn record_access(&self, frame_id: FrameId, access_type: AccessType);
 
     fn set_evictable(&self, frame_id: FrameId, is_evictable: bool);
+
+    fn remove(&self, frame_id: FrameId);
 }

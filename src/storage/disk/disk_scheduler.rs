@@ -16,7 +16,7 @@ enum QueueRequest {
     },
     Write {
         page_id: PageId,
-        data: Box<[u8]>,
+        data: Arc<RwLock<Frame>>,
         thread: Thread,
         // callback: Box<dyn FnOnce()>,
     },
@@ -118,7 +118,7 @@ impl DiskScheduler {
             });
     }
 
-    pub fn schedule_write(&self, page_id: PageId, data: Box<[u8]>, thread: Thread) {
+    pub fn schedule_write(&self, page_id: PageId, data: Arc<RwLock<Frame>>, thread: Thread) {
         if self.handle.is_finished() {
             panic!("Disk scheduler thread has finished");
         }
