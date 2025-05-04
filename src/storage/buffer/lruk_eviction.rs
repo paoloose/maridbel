@@ -109,7 +109,7 @@ impl EvictionPolicy for LRUKEvictionPolicy {
 
         match frame_to_evict {
             Some(frame_id) => {
-                self.nodes_store.write().unwrap().remove(&frame_id);
+                self.remove(frame_id);
                 Some(frame_id)
             }
             _ => None,
@@ -148,8 +148,7 @@ impl EvictionPolicy for LRUKEvictionPolicy {
     }
 
     fn remove(&self, frame_id: FrameId) {
-        let mut frames = self.nodes_store.write().unwrap();
-        frames.remove(&frame_id);
+        self.nodes_store.write().unwrap().remove(&frame_id);
     }
 }
 
