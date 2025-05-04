@@ -79,7 +79,7 @@ impl EvictionPolicy for LRUKEvictionPolicy {
         let mut max_backward_distance = 0_u64;
 
         for frame in self.frames.read().unwrap().values() {
-            assert!(frame.history.len() > 0 && frame.history.len() <= self.k);
+            assert!(!frame.history.is_empty() && frame.history.len() <= self.k);
 
             if !frame.is_evictable {
                 continue;
@@ -94,17 +94,15 @@ impl EvictionPolicy for LRUKEvictionPolicy {
                     least_recent_access = *last_access;
                     frame_to_evict = Some(frame.frame_id);
                 }
+            } else if less_than_k_accesses {
+                max_backward_distance = BACKWARD_DISTANCE_INF;
+                least_recent_access = *last_access;
+                frame_to_evict = Some(frame.frame_id);
             } else {
-                if less_than_k_accesses {
-                    max_backward_distance = BACKWARD_DISTANCE_INF;
-                    least_recent_access = *last_access;
+                let backward_distance = current_timestamp - last_access;
+                if backward_distance > max_backward_distance {
+                    max_backward_distance = backward_distance;
                     frame_to_evict = Some(frame.frame_id);
-                } else {
-                    let backward_distance = current_timestamp - last_access;
-                    if backward_distance > max_backward_distance {
-                        max_backward_distance = backward_distance;
-                        frame_to_evict = Some(frame.frame_id);
-                    }
                 }
             }
         }
@@ -145,15 +143,14 @@ impl EvictionPolicy for LRUKEvictionPolicy {
         let mut frames = self.frames.write().unwrap();
         let node = frames
             .get_mut(&frame_id)
-            .expect(format!("set_evictable: Frame with frame_id={} not found", frame_id).as_str());
+            .unwrap_or_else(|| panic!("set_evictable: Frame with frame_id={} not found", frame_id));
         node.is_evictable = is_evictable;
     }
 }
 
+#[cfg(test)]
 mod test {
-    #[allow(unused_imports)]
     use super::*;
-    #[allow(unused_imports)]
     use std::panic;
 
     #[test]

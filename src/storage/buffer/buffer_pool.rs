@@ -7,7 +7,6 @@ use crate::storage::PageId;
 
 use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
-use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -107,7 +106,7 @@ impl BufferPool {
                 let frame = self
                     .frames
                     .get(free_frame_id as usize)
-                    .expect(format!("Frame id={free_frame_id} out of bounds").as_str());
+                    .unwrap_or_else(|| panic!("Frame id={free_frame_id} out of bounds"));
                 PageReadGuard::new(free_frame_id, frame.clone(), self.eviction_policy.clone())
             }
         }
@@ -156,7 +155,7 @@ impl BufferPool {
                 let frame = self
                     .frames
                     .get(free_frame_id as usize)
-                    .expect(format!("Frame id={free_frame_id} out of bounds").as_str());
+                    .unwrap_or_else(|| panic!("Frame id={free_frame_id} out of bounds"));
                 PageWriteGuard::new(free_frame_id, frame.clone(), self.eviction_policy.clone())
             }
         }
@@ -166,7 +165,7 @@ impl BufferPool {
         let frame = self
             .frames
             .get(frame_id as usize)
-            .expect(format!("Frame id={frame_id} out of bounds").as_str());
+            .unwrap_or_else(|| panic!("Frame id={frame_id} out of bounds"));
 
         self.disk_scheduler
             .schedule_read(page_id, frame.clone(), thread::current());
@@ -199,5 +198,9 @@ impl BufferPool {
     /// Returns the number of allocated frames in the buffer pool in O(n)
     pub fn len(&self) -> usize {
         self.page_table.read().unwrap().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }

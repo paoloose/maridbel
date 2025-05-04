@@ -1,7 +1,4 @@
-use std::{
-    rc::Rc,
-    sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard},
-};
+use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::eviction::EvictionPolicy;
 

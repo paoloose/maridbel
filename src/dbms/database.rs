@@ -28,6 +28,7 @@ impl Database {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&filename)
             .unwrap_or_else(|_| {
                 panic!("Failed to open database file: {:?}", filename);
@@ -52,6 +53,7 @@ impl Default for DatabaseConfig {
     }
 }
 
+#[cfg(test)]
 mod test {
     use super::*;
     use crate::config::PAGE_SIZE;
