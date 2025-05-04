@@ -44,6 +44,8 @@ impl PageReadGuard {
         frame: Arc<RwLock<Frame>>,
         eviction_policy: Arc<dyn EvictionPolicy>,
     ) -> Self {
+        // Acknowledge the page access to the eviction policy
+        eviction_policy.record_access(frame_id, super::eviction::AccessType::Lookup);
         eviction_policy.set_evictable(frame_id, false);
         {
             let mut frame = frame.write().unwrap_or_else(PoisonError::into_inner);
@@ -67,6 +69,8 @@ impl PageWriteGuard {
         frame: Arc<RwLock<Frame>>,
         eviction_policy: Arc<dyn EvictionPolicy>,
     ) -> Self {
+        // Acknowledge the page access to the eviction policy
+        eviction_policy.record_access(frame_id, super::eviction::AccessType::Lookup);
         eviction_policy.set_evictable(frame_id, false);
         {
             let mut frame = frame.write().unwrap_or_else(PoisonError::into_inner);

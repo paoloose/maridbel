@@ -75,10 +75,6 @@ impl BufferPool {
                 // We are not writing to the page table so release the lock inmediatly.
                 drop(page_table);
 
-                // Acknowledge the page access to the eviction policy
-                self.eviction_policy
-                    .record_access(frame_id, super::eviction::AccessType::Lookup);
-
                 println!("Found page_id={page_id} in frame_id={frame_id}");
                 assert!(
                     frame_id < self.pool_size as FrameId,
@@ -92,10 +88,6 @@ impl BufferPool {
                 let free_frame_id = self
                     .try_get_free_frane()
                     .expect("Buffer pool is full. No free frame found.");
-
-                // Acknowledge the page access to the eviction policy
-                self.eviction_policy
-                    .record_access(free_frame_id, super::eviction::AccessType::Lookup);
 
                 page_table.insert(page_id, free_frame_id);
 
@@ -125,11 +117,6 @@ impl BufferPool {
             Some(frame_id) => {
                 // We are not writing to the page table so release the lock inmediatly.
                 drop(page_table);
-
-                // Acknowledge the page access to the eviction policy
-                self.eviction_policy
-                    .record_access(frame_id, super::eviction::AccessType::Lookup);
-
                 assert!(
                     frame_id < self.pool_size as FrameId,
                     "Frame id out of bounds",
@@ -139,14 +126,9 @@ impl BufferPool {
             }
             None => {
                 println!("Page id={page_id} not found in buffer pool. Fetching from disk");
-
                 let free_frame_id = self
                     .try_get_free_frane()
                     .expect("Buffer pool is full. No free frame found.");
-
-                // Acknowledge the page access to the eviction policy
-                self.eviction_policy
-                    .record_access(free_frame_id, super::eviction::AccessType::Lookup);
 
                 page_table.insert(page_id, free_frame_id);
 
