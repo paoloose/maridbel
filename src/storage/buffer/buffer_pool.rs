@@ -1,10 +1,13 @@
+use super::eviction::EvictionPolicy;
 use super::frame::{Frame, FrameId, PageReadGuard, PageWriteGuard};
-use crate::config::PAGE_SIZE;
+use super::lruk_eviction::LRUKEvictionPolicy;
+use crate::config::{LRU_K, PAGE_SIZE};
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::PageId;
 
 use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
+use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -17,13 +20,16 @@ pub struct BufferPool {
     pool_size: usize,
     /// Stores the metadata of the pages in the buffer pool
     /// The buffer pool must guarantee that all entries here are loaded in memory.
-    /// TODO: since this vec is readonly, should i delete the rwlock and use inmutable borrows?
-    frames: Arc<RwLock<Vec<Arc<RwLock<Frame>>>>>,
+    frames: Vec<Arc<RwLock<Frame>>>,
     /// Maps page id to buffer pool frame id. Returns None if the page is not in the buffer pool.
     page_table: Arc<RwLock<HashMap<PageId, FrameId>>>,
     /// The list of available frames for allocation. Getting a free frame is O(1).
     free_list: Arc<RwLock<Vec<FrameId>>>,
+    /// The disk scheduler that will handle the underlying IO operations. The buffer pool
+    /// has no details over how the data is read and written to disk.
     disk_scheduler: DiskScheduler,
+    /// The eviction policy to use when the buffer pool is full.
+    eviction_policy: Arc<dyn EvictionPolicy + Send + Sync>,
 }
 
 impl BufferPool {
@@ -46,17 +52,22 @@ impl BufferPool {
 
         BufferPool {
             pool_size,
-            frames: Arc::new(RwLock::new(frames)),
+            frames,
             free_list: Arc::new(RwLock::new(free_list)),
             page_table: Arc::new(RwLock::new(page_table)),
+            eviction_policy: Arc::new(LRUKEvictionPolicy::new(LRU_K, pool_size)),
             disk_scheduler,
         }
     }
 
-    // TODO: Read CMU code
+    // TODO: This function can fail for the following reasons
+    //       - buffer pool is full and there is no frame to evict
+    //       - the disk scheduler panicked
+    // TODO: Acquiring a full lock over the page_table is a bad design choice. get_page_read
+    //       should be possible to be called multiple times at the same time for different page ids
     pub fn get_page_read(&self, page_id: PageId) -> PageReadGuard {
-        // We acquire exclusive lock over the page because we may potentially write to
-        // the table in the "None" branch
+        // We acquire exclusive lock over the page table because we may potentially write to
+        // it in the "None" branch
         let mut page_table = self.page_table.write().expect("page table was poisoned");
         let maybe_frame_id = page_table.get(&page_id).cloned();
 
@@ -64,25 +75,28 @@ impl BufferPool {
             Some(frame_id) => {
                 // We are not writing to the page table so release the lock inmediatly.
                 drop(page_table);
+
+                // Acknowledge the page access to the eviction policy
+                self.eviction_policy
+                    .record_access(frame_id, super::eviction::AccessType::Lookup);
+
                 println!("Found page_id={page_id} in frame_id={frame_id}");
                 assert!(
                     frame_id < self.pool_size as FrameId,
                     "Frame id out of bounds",
                 );
-                let frames = self.frames.read().unwrap();
-                let frame = frames.get(frame_id as usize).unwrap();
-
-                let cloned_frame = frame.clone();
-                PageReadGuard::new(cloned_frame)
+                let frame = self.frames.get(frame_id as usize).unwrap();
+                PageReadGuard::new(frame_id, frame.clone(), self.eviction_policy.clone())
             }
             None => {
                 println!("Page id={page_id} not found in buffer pool. Fetching from disk");
-                let free_frame_id: FrameId = self
-                    .free_list
-                    .write()
-                    .unwrap()
-                    .pop()
-                    .expect("No free frame found. You better work in your eviction algorithm");
+                let free_frame_id = self
+                    .try_get_free_frane()
+                    .expect("Buffer pool is full. No free frame found.");
+
+                // Acknowledge the page access to the eviction policy
+                self.eviction_policy
+                    .record_access(free_frame_id, super::eviction::AccessType::Lookup);
 
                 page_table.insert(page_id, free_frame_id);
 
@@ -90,13 +104,11 @@ impl BufferPool {
                 self.load_page_from_disk(page_id, free_frame_id);
                 println!("Loaded page id={page_id} into frame_id={free_frame_id}");
 
-                let frames = self.frames.read().unwrap();
-                let frame = frames
+                let frame = self
+                    .frames
                     .get(free_frame_id as usize)
                     .expect(format!("Frame id={free_frame_id} out of bounds").as_str());
-                let cloned_frame = frame.clone();
-
-                PageReadGuard::new(cloned_frame)
+                PageReadGuard::new(free_frame_id, frame.clone(), self.eviction_policy.clone())
             }
         }
     }
@@ -114,43 +126,45 @@ impl BufferPool {
             Some(frame_id) => {
                 // We are not writing to the page table so release the lock inmediatly.
                 drop(page_table);
+
+                // Acknowledge the page access to the eviction policy
+                self.eviction_policy
+                    .record_access(frame_id, super::eviction::AccessType::Lookup);
+
                 assert!(
                     frame_id < self.pool_size as FrameId,
                     "Frame id out of bounds",
                 );
-                let frames = self.frames.read().unwrap();
-                let frame = frames.get(frame_id as usize).unwrap();
-
-                let cloned_frame = frame.clone();
-                PageWriteGuard::new(cloned_frame)
+                let frame = self.frames.get(frame_id as usize).unwrap();
+                PageWriteGuard::new(frame_id, frame.clone(), self.eviction_policy.clone())
             }
             None => {
                 println!("Page id={page_id} not found in buffer pool. Fetching from disk");
 
-                let free_frame_id: FrameId = self
-                    .free_list
-                    .write()
-                    .unwrap()
-                    .pop()
-                    .expect("No free frame found. You better work in your eviction algorithm");
+                let free_frame_id = self
+                    .try_get_free_frane()
+                    .expect("Buffer pool is full. No free frame found.");
+
+                // Acknowledge the page access to the eviction policy
+                self.eviction_policy
+                    .record_access(free_frame_id, super::eviction::AccessType::Lookup);
+
                 page_table.insert(page_id, free_frame_id);
 
                 self.load_page_from_disk(page_id, free_frame_id);
 
-                let frames = self.frames.read().unwrap();
-                let frame = frames
+                let frame = self
+                    .frames
                     .get(free_frame_id as usize)
                     .expect(format!("Frame id={free_frame_id} out of bounds").as_str());
-                let cloned_frame = frame.clone();
-
-                PageWriteGuard::new(cloned_frame)
+                PageWriteGuard::new(free_frame_id, frame.clone(), self.eviction_policy.clone())
             }
         }
     }
 
     fn load_page_from_disk(&self, page_id: PageId, frame_id: FrameId) {
-        let frames = self.frames.read().unwrap();
-        let frame = frames
+        let frame = self
+            .frames
             .get(frame_id as usize)
             .expect(format!("Frame id={frame_id} out of bounds").as_str());
 
@@ -170,7 +184,14 @@ impl BufferPool {
         // }
     }
 
-    pub fn load_free_page(&mut self) {
+    fn try_get_free_frane(&self) -> Option<FrameId> {
+        match self.free_list.write().unwrap().pop() {
+            Some(free_frame_id) => Some(free_frame_id),
+            _ => self.eviction_policy.evict(),
+        }
+    }
+
+    pub fn load_free_page(&self) {
         // TODO: ask for table kind and look in the catalog
         todo!()
     }

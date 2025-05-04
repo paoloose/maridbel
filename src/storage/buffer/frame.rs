@@ -1,4 +1,9 @@
-use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::{
+    rc::Rc,
+    sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard},
+};
+
+use super::eviction::EvictionPolicy;
 
 /// The Buffer Pool frame id for internal use only. It is not associated with the page id.
 pub type FrameId = u16;
@@ -24,16 +29,34 @@ impl Frame {
 
 /// Wrapper for a RwLockReadGuard that decrements the frame pin count
 pub struct PageReadGuard {
+    frame_id: FrameId,
     frame: Arc<RwLock<Frame>>,
+    eviction_policy: Arc<dyn EvictionPolicy>,
+}
+
+/// Wrapper for a RwLockWriteGuard that decrements the frame pin count
+pub struct PageWriteGuard {
+    frame_id: FrameId,
+    frame: Arc<RwLock<Frame>>,
+    eviction_policy: Arc<dyn EvictionPolicy>,
 }
 
 impl PageReadGuard {
-    pub fn new(frame: Arc<RwLock<Frame>>) -> Self {
+    pub fn new(
+        frame_id: FrameId,
+        frame: Arc<RwLock<Frame>>,
+        eviction_policy: Arc<dyn EvictionPolicy>,
+    ) -> Self {
+        eviction_policy.set_evictable(frame_id, false);
         {
             let mut frame = frame.write().unwrap_or_else(PoisonError::into_inner);
             frame.pin_count += 1;
         }
-        PageReadGuard { frame }
+        PageReadGuard {
+            frame_id,
+            frame,
+            eviction_policy,
+        }
     }
 
     pub fn read(&self) -> RwLockReadGuard<'_, Frame> {
@@ -41,19 +64,23 @@ impl PageReadGuard {
     }
 }
 
-/// Wrapper for a RwLockWriteGuard that decrements the frame pin count
-pub struct PageWriteGuard {
-    frame: Arc<RwLock<Frame>>,
-}
-
 impl PageWriteGuard {
-    pub fn new(frame: Arc<RwLock<Frame>>) -> Self {
+    pub fn new(
+        frame_id: FrameId,
+        frame: Arc<RwLock<Frame>>,
+        eviction_policy: Arc<dyn EvictionPolicy>,
+    ) -> Self {
+        eviction_policy.set_evictable(frame_id, false);
         {
             let mut frame = frame.write().unwrap_or_else(PoisonError::into_inner);
             frame.pin_count += 1;
             frame.is_dirty = true;
         }
-        PageWriteGuard { frame }
+        PageWriteGuard {
+            frame_id,
+            frame,
+            eviction_policy,
+        }
     }
 
     pub fn write(&self) -> RwLockWriteGuard<Frame> {
@@ -65,6 +92,10 @@ impl Drop for PageWriteGuard {
     fn drop(&mut self) {
         let mut frame = self.frame.write().unwrap_or_else(PoisonError::into_inner);
         frame.pin_count -= 1;
+        if frame.pin_count == 0 {
+            self.eviction_policy.set_evictable(self.frame_id, true);
+            // TODO: flush to disk?
+        }
     }
 }
 
@@ -72,5 +103,8 @@ impl Drop for PageReadGuard {
     fn drop(&mut self) {
         let mut frame = self.frame.write().unwrap_or_else(PoisonError::into_inner);
         frame.pin_count -= 1;
+        if frame.pin_count == 0 {
+            self.eviction_policy.set_evictable(self.frame_id, true);
+        }
     }
 }

@@ -14,8 +14,9 @@ pub mod storage {
 
     pub mod buffer {
         pub mod buffer_pool;
+        mod eviction;
         pub mod frame;
-        mod lruk;
+        mod lruk_eviction;
     }
 
     pub use buffer::buffer_pool::BufferPool;

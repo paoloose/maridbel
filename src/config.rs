@@ -8,4 +8,6 @@ pub const PAGE_SIZE: usize = 4096;
 /// will generally improve performance, but will also increase memory usage.
 pub const BUFFER_POOL_N_FRAMES: usize = 69;
 
+pub const LRU_K: usize = 4;
+
 static_assert!(PAGE_SIZE % 8 == 0);
