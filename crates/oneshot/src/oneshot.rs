@@ -1,6 +1,7 @@
 use std::cell::UnsafeCell;
 use std::sync::{Arc, Condvar, Mutex};
 
+use crate::errors::SendError;
 use crate::ReceiveError;
 
 pub struct OneshotChannelSender<T> {
@@ -24,16 +25,23 @@ impl<T> OneshotChannelSender<T> {
     ///
     /// The sender is consumed so the resources are released
     /// and no other thread can send data.
-    pub fn send(self, data: T) {
+    pub fn send(self, data: T) -> Result<(), SendError> {
         let (mutex, condvar) = &*self.sync_pair;
         let __ = mutex.lock().unwrap();
 
-        // SAFETY: when this block is reached, we have exclusive access
-        // over the shared mutex.
-        unsafe {
-            *self.data.get() = Some(data);
+        match Arc::try_unwrap(self.data) {
+            Ok(_) => Err(SendError::Closed),
+            Err(shared_data) => {
+                // SAFETY: when this block is reached, we have exclusive access
+                // over the shared mutex.
+                unsafe {
+                    *shared_data.get() = Some(data);
+                }
+                condvar.notify_one();
+
+                Ok(())
+            }
         }
-        condvar.notify_one();
     }
 }
 
@@ -46,20 +54,48 @@ impl<T> OneshotChannelReceiver<T> {
             .lock()
             .map_err(|err| ReceiveError::Other(err.to_string()))?;
 
-        // SAFETY: when this block is reached, we have exclusive access
-        // over the shared mutex.
-        unsafe {
-            let data = &mut *self.data.get();
+        match Arc::try_unwrap(self.data) {
+            Ok(_) => Err(ReceiveError::Closed),
+            Err(shared_data) => {
+                // SAFETY: when this block is reached, we have exclusive access
+                // over the shared mutex.
+                unsafe {
+                    let data = &mut *shared_data.get();
 
-            while data.is_none() {
-                guard = condvar
-                    .wait(guard)
-                    .map_err(|err| ReceiveError::Other(err.to_string()))?;
+                    while data.is_none() {
+                        guard = condvar
+                            .wait(guard)
+                            .map_err(|err| ReceiveError::Other(err.to_string()))?;
+                    }
+                    Ok(data.take().expect("msg"))
+                }
             }
-            Ok(data.take().expect("msg"))
         }
     }
 }
+
+/// Creates a oneshot channel. The channel is composed of a sender and a receiver.
+/// Both the sender and receiver become invalid after the first send/receive.
+///
+/// ## Example
+///
+/// ```
+/// use std::thread;
+/// use oneshot::channel;
+///
+/// let (tx, rx) = channel::<u64>();
+///
+/// thread::spawn(move || {
+///     tx.send(69).unwrap();
+/// });
+///
+/// let data = match rx.recv() {
+///     Ok(num) => num,
+///     Err(_) => unreachable!(),
+/// };
+///
+/// assert_eq!(data, 69);
+/// ```
 
 pub fn channel<T>() -> (OneshotChannelSender<T>, OneshotChannelReceiver<T>) {
     let data1 = Arc::new(UnsafeCell::new(None));
@@ -91,7 +127,7 @@ mod test {
         let (tx, rx) = channel::<u64>();
 
         thread::spawn(move || {
-            tx.send(69);
+            tx.send(69).unwrap();
         });
 
         let data = match rx.recv() {
@@ -115,14 +151,29 @@ mod test {
             assert_eq!(data, 69);
         });
 
-        tx.send(69);
+        tx.send(69).unwrap();
     }
 
     #[test]
-    fn test_oneshot_handle_error() {
+    fn test_oneshot_handle_receiver_drop() {
         let (tx, rx) = channel::<u64>();
 
         drop(rx);
-        tx.send(69);
+        assert_eq!(tx.send(69).unwrap_err(), SendError::Closed);
+    }
+
+    #[test]
+    fn test_oneshot_handle_sender_drop() {
+        let (tx, rx) = channel::<u64>();
+
+        drop(tx);
+        assert_eq!(rx.recv().unwrap_err(), ReceiveError::Closed);
+    }
+
+    #[test]
+    fn test_oneshot_handle_sender_and_receiver_drop() {
+        let (tx, rx) = channel::<u64>();
+        drop(tx);
+        drop(rx);
     }
 }
