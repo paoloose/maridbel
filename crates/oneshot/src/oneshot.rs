@@ -1,9 +1,7 @@
-use std::{
-    cell::UnsafeCell,
-    error::Error,
-    fmt::Display,
-    sync::{Arc, Condvar, Mutex},
-};
+use std::cell::UnsafeCell;
+use std::sync::{Arc, Condvar, Mutex};
+
+use crate::ReceiveError;
 
 pub struct OneshotChannelSender<T> {
     data: Arc<UnsafeCell<Option<T>>>,
@@ -82,35 +80,6 @@ pub fn channel<T>() -> (OneshotChannelSender<T>, OneshotChannelReceiver<T>) {
     )
 }
 
-#[derive(Debug)]
-pub enum ReceiveError {
-    Closed,
-    Other(String),
-}
-
-impl Error for ReceiveError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        None
-    }
-
-    fn description(&self) -> &str {
-        "description() is deprecated; use Display"
-    }
-
-    fn cause(&self) -> Option<&dyn Error> {
-        self.source()
-    }
-}
-
-impl Display for ReceiveError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ReceiveError::Closed => write!(f, "Channel closed"),
-            ReceiveError::Other(msg) => write!(f, "Cannot wait for message: {}", msg),
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
     use std::thread;
@@ -151,6 +120,9 @@ mod test {
 
     #[test]
     fn test_oneshot_handle_error() {
-        // TODO: handle recv or send drop
+        let (tx, rx) = channel::<u64>();
+
+        drop(rx);
+        tx.send(69);
     }
 }
