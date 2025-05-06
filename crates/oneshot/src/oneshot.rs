@@ -1,98 +1,85 @@
 use std::{
-    cell::{RefCell, UnsafeCell},
+    cell::UnsafeCell,
     error::Error,
     fmt::Display,
     sync::{Arc, Condvar, Mutex},
 };
 
-pub struct OneshotChannel<T> {
-    data: UnsafeCell<Option<T>>,
-    sync_pair: Arc<(Mutex<bool>, Condvar)>,
-}
-
 pub struct OneshotChannelSender<T> {
-    data: UnsafeCell<Option<T>>,
+    data: Arc<UnsafeCell<Option<T>>>,
     sync_pair: Arc<(Mutex<bool>, Condvar)>,
 }
 
 pub struct OneshotChannelReceiver<T> {
-    data: RefCell<Option<T>>,
+    data: Arc<UnsafeCell<Option<T>>>,
     sync_pair: Arc<(Mutex<bool>, Condvar)>,
 }
 
+// SAFETY: UnsafeCell<Option<T>> is not safe to send to another thread,
+// but we guarantee safety by synchronizing access to the data using the sync_pair condvar.
+unsafe impl<T> Send for OneshotChannelSender<T> {}
+unsafe impl<T> Send for OneshotChannelReceiver<T> {}
+
 impl<T> OneshotChannelSender<T> {
+    /// Sends the oneshot data to the receiver.
+    /// It never blocks. Always returns inmediatly.
+    ///
+    /// The sender is consumed so the resources are released
+    /// and no other thread can send data.
     pub fn send(self, data: T) {
         let (mutex, condvar) = &*self.sync_pair;
         let __ = mutex.lock().unwrap();
-        *self.data.borrow_mut() = Some(data);
+
+        // SAFETY: when this block is reached, we have exclusive access
+        // over the shared mutex.
+        unsafe {
+            *self.data.get() = Some(data);
+        }
         condvar.notify_one();
     }
 }
 
 impl<T> OneshotChannelReceiver<T> {
+    /// Blocks until ther is data available.
+    /// The data is made available by the sender when send is called.
     pub fn recv(self) -> Result<T, ReceiveError> {
         let (mutex, condvar) = &*self.sync_pair;
         let mut guard = mutex
             .lock()
             .map_err(|err| ReceiveError::Other(err.to_string()))?;
 
-        while self.data.borrow().is_none() {
-            guard = condvar
-                .wait(guard)
-                .map_err(|err| ReceiveError::Other(err.to_string()))?;
+        // SAFETY: when this block is reached, we have exclusive access
+        // over the shared mutex.
+        unsafe {
+            let data = &mut *self.data.get();
+
+            while data.is_none() {
+                guard = condvar
+                    .wait(guard)
+                    .map_err(|err| ReceiveError::Other(err.to_string()))?;
+            }
+            Ok(data.take().expect("msg"))
         }
-        Ok(self.data.take().expect("msg"))
     }
 }
 
 pub fn channel<T>() -> (OneshotChannelSender<T>, OneshotChannelReceiver<T>) {
-    let data = UnsafeCell::new(None);
+    let data1 = Arc::new(UnsafeCell::new(None));
+    let data2 = data1.clone();
 
     let sync_pair1 = Arc::new((Mutex::new(false), Condvar::new()));
     let sync_pair2 = sync_pair1.clone();
 
     (
         OneshotChannelSender {
-            data,
+            data: data1,
             sync_pair: sync_pair1,
         },
         OneshotChannelReceiver {
-            data: data,
+            data: data2,
             sync_pair: sync_pair2,
         },
     )
-}
-
-unsafe impl<T> Sync for OneshotChannel<T> {}
-
-impl<T> OneshotChannel<T> {
-    pub fn new() -> Self {
-        OneshotChannel {
-            data: RefCell::new(None),
-            sync_pair: Arc::new((Mutex::new(false), Condvar::new())),
-        }
-    }
-
-    pub fn send(&self, data: T) {
-        let (mutex, condvar) = &*self.sync_pair;
-        let __ = mutex.lock().unwrap();
-        *self.data.borrow_mut() = Some(data);
-        condvar.notify_one();
-    }
-
-    pub fn recv(&self) -> Result<T, ReceiveError> {
-        let (mutex, condvar) = &*self.sync_pair;
-        let mut guard = mutex
-            .lock()
-            .map_err(|err| ReceiveError::Other(err.to_string()))?;
-
-        while self.data.borrow().is_none() {
-            guard = condvar
-                .wait(guard)
-                .map_err(|err| ReceiveError::Other(err.to_string()))?;
-        }
-        Ok(self.data.take().expect("msg"))
-    }
 }
 
 #[derive(Debug)]
@@ -131,18 +118,39 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_oneshot_two_threads() {
-        let channel = Arc::new(OneshotChannel::<u64>::new());
-        let cloned_channel = channel.clone();
+    fn test_oneshot_send_in_other_thread() {
+        let (tx, rx) = channel::<u64>();
 
         thread::spawn(move || {
-            cloned_channel.clone().send(69);
+            tx.send(69);
         });
 
-        let data = match channel.recv() {
+        let data = match rx.recv() {
             Ok(num) => num,
             Err(_) => unreachable!(),
         };
+
         assert_eq!(data, 69);
+    }
+
+    #[test]
+    fn test_oneshot_receive_in_other_thread() {
+        let (tx, rx) = channel::<u64>();
+
+        thread::spawn(move || {
+            let data = match rx.recv() {
+                Ok(num) => num,
+                Err(_) => unreachable!(),
+            };
+
+            assert_eq!(data, 69);
+        });
+
+        tx.send(69);
+    }
+
+    #[test]
+    fn test_oneshot_handle_error() {
+        // TODO: handle recv or send drop
     }
 }
