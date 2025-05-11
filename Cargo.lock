@@ -5,3 +5,10 @@ version = 4
 [[package]]
 name = "maridbel"
 version = "0.0.0-rc.1"
+dependencies = [
+ "oneshot",
+]
+
+[[package]]
+name = "oneshot"
+version = "0.1.0"
