@@ -1,17 +1,21 @@
 use crate::config::PAGE_SIZE;
+use crate::errors::ScheduleError;
 use crate::storage::page::THE_EMPTY_PAGE;
 use crate::storage::{Frame, PageId};
+use oneshot::{OneshotChannelReceiver, OneshotChannelSender};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::panic;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{JoinHandle, Thread};
 use std::time::Duration;
 
+pub type ScheduleResult = Result<(), ScheduleError>;
+
 enum QueueRequest {
     Read {
         page_id: PageId,
         buffer: Arc<RwLock<Frame>>,
-        thread: Thread,
+        channel: OneshotChannelSender<ScheduleResult>,
         // callback: Box<dyn FnOnce()>,
     },
     Write {
@@ -58,25 +62,27 @@ impl DiskScheduler {
                     Some(QueueRequest::Read {
                         page_id,
                         buffer,
-                        thread,
+                        channel,
                     }) => {
                         reader
                             .seek(SeekFrom::Start(page_id_to_file_offset(page_id)))
                             .unwrap();
 
+                        println!("reading page_id={page_id} into buffer");
+
                         let mut buffer = buffer.write().expect("could not lock buffer for reading");
                         match reader.read_exact(&mut buffer.data) {
                             Ok(_) => {
-                                thread.unpark();
+                                channel.send(Ok(())).unwrap();
                             }
                             // catch eof
                             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                                 reader.write_all(&THE_EMPTY_PAGE).unwrap();
                                 buffer.data.copy_from_slice(&THE_EMPTY_PAGE);
-                                thread.unpark();
+                                channel.send(Err(ScheduleError::UnexpectedEof)).unwrap();
                             }
                             Err(e) => {
-                                println!("Error reading from disk: {e}");
+                                channel.send(Err(ScheduleError::IOError(e))).unwrap();
                             }
                         }
                     }
@@ -104,7 +110,13 @@ impl DiskScheduler {
         }
     }
 
-    pub fn schedule_read(&self, page_id: PageId, buffer: Arc<RwLock<Frame>>, thread: Thread) {
+    pub fn schedule_read(
+        &self,
+        page_id: PageId,
+        buffer: Arc<RwLock<Frame>>,
+    ) -> OneshotChannelReceiver<ScheduleResult> {
+        let (tx, rx) = oneshot::channel::<ScheduleResult>();
+
         if self.handle.is_finished() {
             panic!("Disk scheduler thread has finished");
         }
@@ -114,8 +126,10 @@ impl DiskScheduler {
             .push(QueueRequest::Read {
                 page_id,
                 buffer,
-                thread,
+                channel: tx,
             });
+
+        rx
     }
 
     pub fn schedule_write(&self, page_id: PageId, data: Arc<RwLock<Frame>>, thread: Thread) {

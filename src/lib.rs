@@ -1,4 +1,5 @@
 mod config;
+mod errors;
 mod macros;
 
 // For submodules I only expose the public API to the parent module

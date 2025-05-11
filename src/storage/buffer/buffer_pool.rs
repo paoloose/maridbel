@@ -2,6 +2,7 @@ use super::eviction::EvictionPolicy;
 use super::frame::{Frame, FrameId, PageReadGuard, PageWriteGuard};
 use super::lruk_eviction::LRUKEvictionPolicy;
 use crate::config::{LRU_K, PAGE_SIZE};
+use crate::errors::BufferPoolError;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::PageId;
 
@@ -64,7 +65,7 @@ impl BufferPool {
     //       - the disk scheduler panicked
     // TODO: Acquiring a full lock over the page_table is a bad design choice. get_page_read
     //       should be possible to be called multiple times at the same time for different page ids
-    pub fn get_page_read(&self, page_id: PageId) -> PageReadGuard {
+    pub fn get_page_read(&self, page_id: PageId) -> Result<PageReadGuard, BufferPoolError> {
         // We acquire exclusive lock over the page table because we may potentially write to
         // it in the "None" branch
         let mut page_table = self.page_table.write().expect("page table was poisoned");
@@ -81,7 +82,11 @@ impl BufferPool {
                     "Frame id out of bounds",
                 );
                 let frame = self.frames.get(frame_id as usize).unwrap();
-                PageReadGuard::new(frame_id, frame.clone(), self.eviction_policy.clone())
+                Ok(PageReadGuard::new(
+                    frame_id,
+                    frame.clone(),
+                    self.eviction_policy.clone(),
+                ))
             }
             None => {
                 println!("Page id={page_id} not found in buffer pool. Fetching from disk");
@@ -99,7 +104,12 @@ impl BufferPool {
                     .frames
                     .get(free_frame_id as usize)
                     .unwrap_or_else(|| panic!("Frame id={free_frame_id} out of bounds"));
-                PageReadGuard::new(free_frame_id, frame.clone(), self.eviction_policy.clone())
+
+                Ok(PageReadGuard::new(
+                    free_frame_id,
+                    frame.clone(),
+                    self.eviction_policy.clone(),
+                ))
             }
         }
     }
@@ -107,7 +117,7 @@ impl BufferPool {
     /// Returns a write (exclusive) guard for a frame, efectively pinning it.
     /// If no free frame is available, it will ask the replacer to evict a frame.
     /// If no frame can be evicted, it will block until a frame is available.
-    pub fn get_page_write(&self, page_id: PageId) -> PageWriteGuard {
+    pub fn get_page_write(&self, page_id: PageId) -> Result<PageWriteGuard, BufferPoolError> {
         // We acquire exclusive lock over the page because we may potentially write to
         // the table in the "None" branch
         let mut page_table = self.page_table.write().expect("page table was poisoned");
@@ -122,7 +132,11 @@ impl BufferPool {
                     "Frame id out of bounds",
                 );
                 let frame = self.frames.get(frame_id as usize).unwrap();
-                PageWriteGuard::new(frame_id, frame.clone(), self.eviction_policy.clone())
+                Ok(PageWriteGuard::new(
+                    frame_id,
+                    frame.clone(),
+                    self.eviction_policy.clone(),
+                ))
             }
             None => {
                 println!("Page id={page_id} not found in buffer pool. Fetching from disk");
@@ -132,18 +146,27 @@ impl BufferPool {
 
                 page_table.insert(page_id, free_frame_id);
 
-                self.load_page_from_disk(page_id, free_frame_id);
+                self.load_page_from_disk(page_id, free_frame_id)?;
 
                 let frame = self
                     .frames
                     .get(free_frame_id as usize)
                     .unwrap_or_else(|| panic!("Frame id={free_frame_id} out of bounds"));
-                PageWriteGuard::new(free_frame_id, frame.clone(), self.eviction_policy.clone())
+
+                Ok(PageWriteGuard::new(
+                    free_frame_id,
+                    frame.clone(),
+                    self.eviction_policy.clone(),
+                ))
             }
         }
     }
 
-    fn load_page_from_disk(&self, page_id: PageId, frame_id: FrameId) {
+    fn load_page_from_disk(
+        &self,
+        page_id: PageId,
+        frame_id: FrameId,
+    ) -> Result<(), BufferPoolError> {
         let frame = self
             .frames
             .get(frame_id as usize)
@@ -153,11 +176,9 @@ impl BufferPool {
             frame.write().unwrap().page_id = Some(page_id);
         }
 
-        self.disk_scheduler
-            .schedule_read(page_id, frame.clone(), thread::current());
-
-        println!("Parking thread waiting for page id={page_id} to be read");
-        thread::park();
+        let receiver = self.disk_scheduler.schedule_read(page_id, frame.clone());
+        let _ = receiver.recv().expect("Schedule read succeeded");
+        Ok(())
     }
 
     fn try_get_free_frane(&self) -> Option<FrameId> {

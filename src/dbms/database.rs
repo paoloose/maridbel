@@ -87,7 +87,7 @@ mod test {
             let cloned_buffer_pool = db.buffer_pool.clone();
 
             let t = std::thread::spawn(move || {
-                let page = cloned_buffer_pool.get_page_read(0);
+                let page = cloned_buffer_pool.get_page_read(0).expect("TODO: HANDLE");
                 let data = &page.read().data;
 
                 assert_eq!(data[0], 7);
@@ -122,7 +122,7 @@ mod test {
             let cloned_buffer_pool = db.buffer_pool.clone();
 
             let t = std::thread::spawn(move || {
-                let page = cloned_buffer_pool.get_page_write(0);
+                let page = cloned_buffer_pool.get_page_write(0).expect("TODO: HANDLE");
                 page.write().data = vec![i as u8; PAGE_SIZE].into();
             });
             threads.push(t);
@@ -133,7 +133,7 @@ mod test {
         }
 
         assert_eq!(db.buffer_pool.len(), 1);
-        let page = db.buffer_pool.get_page_read(0);
+        let page = db.buffer_pool.get_page_read(0).expect("TODO: HANDLE");
         let data = &page.read().data;
         let first_byte = data[0];
         // the same first byte should be written in all the page
