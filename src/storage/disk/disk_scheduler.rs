@@ -16,13 +16,11 @@ enum QueueRequest {
         page_id: PageId,
         buffer: Arc<RwLock<Frame>>,
         channel: OneshotChannelSender<ScheduleResult>,
-        // callback: Box<dyn FnOnce()>,
     },
     Write {
         page_id: PageId,
         data: Arc<RwLock<Frame>>,
-        thread: Thread,
-        // callback: Box<dyn FnOnce()>,
+        channel: OneshotChannelSender<ScheduleResult>,
     },
 }
 
@@ -73,6 +71,7 @@ impl DiskScheduler {
                         let mut buffer = buffer.write().expect("could not lock buffer for reading");
                         match reader.read_exact(&mut buffer.data) {
                             Ok(_) => {
+                                // Unwrapped because the caller must not drop the receiver
                                 channel.send(Ok(())).unwrap();
                             }
                             // catch eof
@@ -89,11 +88,11 @@ impl DiskScheduler {
                     Some(QueueRequest::Write {
                         page_id,
                         data,
-                        thread: _,
+                        channel,
                     }) => {
                         println!("writing data {data:?} into page_id={page_id}");
+                        channel.send(Ok(())).unwrap();
                         todo!("writing not implemented");
-                        // thread.unpark();
                     }
                     None => {
                         // No requests in the queue, sleep for a while
@@ -132,7 +131,13 @@ impl DiskScheduler {
         rx
     }
 
-    pub fn schedule_write(&self, page_id: PageId, data: Arc<RwLock<Frame>>, thread: Thread) {
+    pub fn schedule_write(
+        &self,
+        page_id: PageId,
+        data: Arc<RwLock<Frame>>,
+    ) -> OneshotChannelReceiver<ScheduleResult> {
+        let (tx, rx) = oneshot::channel::<ScheduleResult>();
+
         if self.handle.is_finished() {
             panic!("Disk scheduler thread has finished");
         }
@@ -142,8 +147,10 @@ impl DiskScheduler {
             .push(QueueRequest::Write {
                 page_id,
                 data,
-                thread,
+                channel: tx,
             });
+
+        rx
     }
 }
 

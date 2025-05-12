@@ -78,6 +78,7 @@ impl EvictionPolicy for LRUKEvictionPolicy {
         let mut least_recent_access = 0_u64;
         let mut max_backward_distance = 0_u64;
 
+        // We will search for all the frames and find which is the best candidate to evict.
         for frame in self.nodes_store.read().unwrap().values() {
             assert!(!frame.history.is_empty() && frame.history.len() <= self.k);
 

@@ -177,7 +177,10 @@ impl BufferPool {
         }
 
         let receiver = self.disk_scheduler.schedule_read(page_id, frame.clone());
-        let _ = receiver.recv().expect("Schedule read succeeded");
+        receiver
+            .recv()
+            .expect("Disk scheduler sender dropped but that's illegal")
+            .expect("Disk scheduler panicked");
         Ok(())
     }
 
@@ -187,6 +190,7 @@ impl BufferPool {
             _ => {}
         };
 
+        // TODO: calling evit simultaneously from multiple threads is not safe
         match self.eviction_policy.evict() {
             Some(evicted_frame_id) => {
                 let evicted_frame_lock = self
@@ -200,11 +204,9 @@ impl BufferPool {
                 assert!(evicted_frame.pin_count == 0);
 
                 if evicted_frame.is_dirty {
-                    self.disk_scheduler.schedule_write(
-                        evicted_frame.page_id.unwrap(),
-                        evicted_frame_lock.clone(),
-                        thread::current(),
-                    );
+                    self.disk_scheduler
+                        .schedule_write(evicted_frame.page_id.unwrap(), evicted_frame_lock.clone());
+                    // TODO: evicted frame should've be removed inmediatly after eviction
                     self.eviction_policy.remove(evicted_frame_id);
                 }
                 Some(evicted_frame_id)
