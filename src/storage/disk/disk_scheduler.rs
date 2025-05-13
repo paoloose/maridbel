@@ -6,7 +6,7 @@ use oneshot::{OneshotChannelReceiver, OneshotChannelSender};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::panic;
 use std::sync::{Arc, Mutex, RwLock};
-use std::thread::{JoinHandle, Thread};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 pub type ScheduleResult = Result<(), ScheduleError>;
@@ -43,6 +43,13 @@ impl DiskScheduler {
             panic::set_hook(Box::new(move |info| {
                 hook(info);
                 println!("Disk scheduler thread panicked: {:#?}", info);
+                if let Some(payload) = info.payload().downcast_ref::<&str>() {
+                    println!("Payload: {}", payload);
+                } else if let Some(payload) = info.payload().downcast_ref::<String>() {
+                    println!("Payload: {}", payload);
+                } else {
+                    println!("Payload: <unknown>");
+                }
                 panic!();
             }));
 
@@ -74,11 +81,12 @@ impl DiskScheduler {
                                 // Unwrapped because the caller must not drop the receiver
                                 channel.send(Ok(())).unwrap();
                             }
-                            // catch eof
+                            // EOF are not errors.W e interpret this as the buffer pool wanting
+                            // to read an empty page
                             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                                 reader.write_all(&THE_EMPTY_PAGE).unwrap();
                                 buffer.data.copy_from_slice(&THE_EMPTY_PAGE);
-                                channel.send(Err(ScheduleError::UnexpectedEof)).unwrap();
+                                channel.send(Ok(())).unwrap();
                             }
                             Err(e) => {
                                 channel.send(Err(ScheduleError::IOError(e))).unwrap();
