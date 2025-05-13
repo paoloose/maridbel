@@ -9,7 +9,6 @@ use crate::storage::PageId;
 use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
 use std::sync::{Arc, RwLock};
-use std::thread;
 
 /// # Design principles
 ///
@@ -97,7 +96,8 @@ impl BufferPool {
                 page_table.insert(page_id, free_frame_id);
 
                 println!("Found empty frame frame_id={free_frame_id}. Loading page id={page_id}");
-                self.load_page_from_disk(page_id, free_frame_id);
+                self.load_page_from_disk(page_id, free_frame_id)
+                    .expect("Failed to load page from disk");
                 println!("Loaded page id={page_id} into frame_id={free_frame_id}");
 
                 let frame = self
