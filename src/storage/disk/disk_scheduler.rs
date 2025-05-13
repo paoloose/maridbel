@@ -69,13 +69,16 @@ impl DiskScheduler {
                         buffer,
                         channel,
                     }) => {
-                        reader
-                            .seek(SeekFrom::Start(page_id_to_file_offset(page_id)))
-                            .unwrap();
-
                         println!("reading page_id={page_id} into buffer");
-
                         let mut buffer = buffer.write().expect("could not lock buffer for reading");
+
+                        if let Err(e) =
+                            reader.seek(SeekFrom::Start(page_id_to_file_offset(page_id)))
+                        {
+                            channel.send(Err(ScheduleError::IOError(e))).unwrap();
+                            return;
+                        }
+
                         match reader.read_exact(&mut buffer.data) {
                             Ok(_) => {
                                 // Unwrapped because the caller must not drop the receiver
@@ -99,8 +102,23 @@ impl DiskScheduler {
                         channel,
                     }) => {
                         println!("writing data {data:?} into page_id={page_id}");
-                        channel.send(Ok(())).unwrap();
-                        todo!("writing not implemented");
+                        let frame = data.write().expect("could not lock buffer for writing");
+
+                        if let Err(e) =
+                            reader.seek(SeekFrom::Start(page_id_to_file_offset(page_id)))
+                        {
+                            channel.send(Err(ScheduleError::IOError(e))).unwrap();
+                            return;
+                        }
+
+                        match reader.write_all(&frame.data) {
+                            Ok(_) => {
+                                channel.send(Ok(())).unwrap();
+                            }
+                            Err(e) => {
+                                channel.send(Err(ScheduleError::IOError(e))).unwrap();
+                            }
+                        }
                     }
                     None => {
                         // No requests in the queue, sleep for a while
@@ -166,4 +184,47 @@ impl DiskScheduler {
 
 fn page_id_to_file_offset(id: PageId) -> u64 {
     id as u64 * PAGE_SIZE as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::buffer::frame::Frame;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_disk_scheduler() {
+        let frame1 = Arc::new(RwLock::new(Frame::new(
+            vec![0u8; PAGE_SIZE].into_boxed_slice(),
+        )));
+
+        let frame2 = Arc::new(RwLock::new(Frame::new(
+            vec![0u8; PAGE_SIZE].into_boxed_slice(),
+        )));
+
+        // Write some string data into frame1
+        let data = b"A test string.";
+        frame1.write().unwrap().data[0..data.len()].copy_from_slice(data);
+
+        let db = Cursor::new(vec![]);
+
+        let scheduler = DiskScheduler::new(db);
+
+        scheduler
+            .schedule_write(0, frame1.clone())
+            .recv()
+            .unwrap()
+            .unwrap();
+
+        scheduler
+            .schedule_read(0, frame2.clone())
+            .recv()
+            .unwrap()
+            .unwrap();
+
+        let data1 = &frame1.read().unwrap().data;
+        let data2 = &frame2.read().unwrap().data;
+
+        assert_eq!(data1, data2, "Data mismatch");
+    }
 }
