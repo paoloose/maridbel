@@ -48,7 +48,7 @@ impl<T> OneshotChannelSender<T> {
 impl<T> OneshotChannelReceiver<T> {
     /// Blocks until ther is data available.
     /// The data is made available by the sender when send is called.
-    pub fn recv(self) -> Result<T, ReceiveError> {
+    pub fn try_recv(self) -> Result<T, ReceiveError> {
         let (mutex, condvar) = &*self.sync_pair;
         let mut guard = mutex
             .lock()
@@ -71,6 +71,12 @@ impl<T> OneshotChannelReceiver<T> {
                 }
             }
         }
+    }
+
+    /// Blocks until ther is data available.
+    /// The data is made available by the sender when send is called.
+    pub fn recv(self) -> T {
+        self.try_recv().unwrap()
     }
 }
 

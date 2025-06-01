@@ -210,17 +210,8 @@ mod tests {
 
         let scheduler = DiskScheduler::new(db);
 
-        scheduler
-            .schedule_write(0, frame1.clone())
-            .recv()
-            .unwrap()
-            .unwrap();
-
-        scheduler
-            .schedule_read(0, frame2.clone())
-            .recv()
-            .unwrap()
-            .unwrap();
+        scheduler.schedule_write(0, frame1.clone()).recv().unwrap();
+        scheduler.schedule_read(0, frame2.clone()).recv().unwrap();
 
         let data1 = &frame1.read().unwrap().data;
         let data2 = &frame2.read().unwrap().data;

@@ -179,8 +179,7 @@ impl BufferPool {
         let receiver = self.disk_scheduler.schedule_read(page_id, frame.clone());
         receiver
             .recv()
-            .expect("Disk scheduler sender dropped but that's illegal")
-            .expect("Disk scheduler panicked");
+            .expect("Disk scheduler sender dropped/panicked but that's illegal.");
         Ok(())
     }
 
