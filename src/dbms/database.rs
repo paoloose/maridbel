@@ -57,6 +57,7 @@ impl Default for DatabaseConfig {
 mod test {
     use super::*;
     use crate::config::PAGE_SIZE;
+    use crate::shared::logger::setup_logger;
     use std::io::Cursor;
     use std::sync::{atomic::AtomicUsize, Arc};
 
@@ -64,6 +65,7 @@ mod test {
 
     #[test]
     fn test_create_database_from_reader() {
+        setup_logger();
         let database = vec![0u8; PAGE_SIZE];
         let reader = Cursor::new(database);
 
@@ -74,6 +76,7 @@ mod test {
 
     #[test]
     fn test_database_multiple_readers() {
+        setup_logger();
         let data = vec![7u8; PAGE_SIZE];
         let reader = Cursor::new(data);
 
@@ -112,6 +115,7 @@ mod test {
 
     #[test]
     fn test_database_multiple_writers_and_reader() {
+        setup_logger();
         let data = vec![]; // empty database
         let reader = Cursor::new(data);
 

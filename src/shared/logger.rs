@@ -15,8 +15,13 @@ static SETUP_LOGS: Once = Once::new();
 
 #[cfg(test)]
 pub fn setup_logger() {
+    // Always show logs in tests, default to 'debug' if RUST_LOG is not set
     SETUP_LOGS.call_once(|| {
-        build_logger().is_test(true).init();
+        let mut builder = build_logger();
+        if std::env::var_os("RUST_LOG").is_none() {
+            builder.filter_level(log::LevelFilter::Trace);
+        }
+        builder.is_test(true).init();
     });
 }
 

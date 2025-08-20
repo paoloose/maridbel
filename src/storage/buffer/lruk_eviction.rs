@@ -157,6 +157,8 @@ impl EvictionPolicy for LRUKEvictionPolicy {
 
 #[cfg(test)]
 mod test {
+    use crate::shared::logger::setup_logger;
+
     use super::*;
     use std::panic;
 
@@ -164,6 +166,7 @@ mod test {
     /// Corresponding CMU test suite
     /// https://github.com/cmu-db/bustub/blob/8de6f6b57fbb3511f21e581379464c2e182d751d/test/buffer/lru_k_replacer_test.cpp
     fn test_lruk_replacer() {
+        setup_logger();
         let n_frames = 7;
         let k = 2;
 
