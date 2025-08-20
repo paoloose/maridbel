@@ -1,7 +1,12 @@
+use std::sync::LazyLock;
+
 use crate::macros::static_assert;
 
 /// The size (in bytes) of a page in the buffer pool
 pub const PAGE_SIZE: usize = 4096;
+
+pub static CARGO_PKG_NAME: LazyLock<String> =
+    LazyLock::new(|| std::env::var("CARGO_PKG_NAME").unwrap_or("maridbel".into()));
 
 /// The number of frames in the buffer pool.
 /// The more frames, the more pages we can cache in memory. Increasing this value
