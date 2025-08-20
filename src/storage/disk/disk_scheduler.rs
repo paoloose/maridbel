@@ -42,13 +42,13 @@ impl DiskScheduler {
             let hook = panic::take_hook();
             panic::set_hook(Box::new(move |info| {
                 hook(info);
-                println!("Disk scheduler thread panicked: {:#?}", info);
+                log::error!("Disk scheduler thread panicked: {:#?}", info);
                 if let Some(payload) = info.payload().downcast_ref::<&str>() {
-                    println!("Payload: {}", payload);
+                    log::error!("Payload: {}", payload);
                 } else if let Some(payload) = info.payload().downcast_ref::<String>() {
-                    println!("Payload: {}", payload);
+                    log::error!("Payload: {}", payload);
                 } else {
-                    println!("Payload: <unknown>");
+                    log::error!("Payload: <unknown>");
                 }
                 panic!();
             }));
@@ -69,7 +69,7 @@ impl DiskScheduler {
                         buffer,
                         channel,
                     }) => {
-                        println!("reading page_id={page_id} into buffer");
+                        log::trace!("DiskScheduler->read(page_id={page_id})");
                         let mut buffer = buffer.write().expect("could not lock buffer for reading");
 
                         if let Err(e) =
@@ -101,7 +101,7 @@ impl DiskScheduler {
                         data,
                         channel,
                     }) => {
-                        println!("writing data {data:?} into page_id={page_id}");
+                        log::trace!("DiskScheduler->write(page_id={page_id})");
                         let frame = data.write().expect("could not lock buffer for writing");
 
                         if let Err(e) =

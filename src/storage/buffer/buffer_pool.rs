@@ -65,6 +65,7 @@ impl BufferPool {
     // TODO: Acquiring a full lock over the page_table is a bad design choice. get_page_read
     //       should be possible to be called multiple times at the same time for different page ids
     pub fn get_page_read(&self, page_id: PageId) -> Result<PageReadGuard, BufferPoolError> {
+        log::trace!("BufferPool::get_page_read({page_id})");
         // We acquire exclusive lock over the page table because we may potentially write to
         // it in the "None" branch
         let mut page_table = self.page_table.write().expect("page table was poisoned");
@@ -75,7 +76,7 @@ impl BufferPool {
                 // We are not writing to the page table so release the lock inmediatly.
                 drop(page_table);
 
-                println!("Found page_id={page_id} in frame_id={frame_id}");
+                log::trace!("Found page_id={page_id} in frame_id={frame_id}");
                 assert!(
                     frame_id < self.pool_size as FrameId,
                     "Frame id out of bounds",
@@ -88,17 +89,16 @@ impl BufferPool {
                 ))
             }
             None => {
-                println!("Page id={page_id} not found in buffer pool. Fetching from disk");
+                log::trace!("Page id={page_id} not found in buffer pool. Fetching from disk");
                 let free_frame_id = self
                     .try_get_free_frane()
                     .expect("Buffer pool is full. No free frame found.");
 
+                log::trace!("Found empty frame_id={free_frame_id}. Loading page id={page_id}");
                 page_table.insert(page_id, free_frame_id);
 
-                println!("Found empty frame frame_id={free_frame_id}. Loading page id={page_id}");
-                self.load_page_from_disk(page_id, free_frame_id)
-                    .expect("Failed to load page from disk");
-                println!("Loaded page id={page_id} into frame_id={free_frame_id}");
+                self.load_page_from_disk(page_id, free_frame_id)?;
+                log::trace!("Loaded page_id={page_id} into frame_id={free_frame_id} from disk");
 
                 let frame = self
                     .frames
@@ -118,6 +118,7 @@ impl BufferPool {
     /// If no free frame is available, it will ask the replacer to evict a frame.
     /// If no frame can be evicted, it will block until a frame is available.
     pub fn get_page_write(&self, page_id: PageId) -> Result<PageWriteGuard, BufferPoolError> {
+        log::trace!("BufferPool::get_page_write({page_id})");
         // We acquire exclusive lock over the page because we may potentially write to
         // the table in the "None" branch
         let mut page_table = self.page_table.write().expect("page table was poisoned");
@@ -139,14 +140,16 @@ impl BufferPool {
                 ))
             }
             None => {
-                println!("Page id={page_id} not found in buffer pool. Fetching from disk");
+                log::trace!("Page id={page_id} not found in buffer pool. Fetching from disk");
                 let free_frame_id = self
                     .try_get_free_frane()
                     .expect("Buffer pool is full. No free frame found.");
 
+                log::trace!("Found empty frame_id={free_frame_id}. Loading page id={page_id}");
                 page_table.insert(page_id, free_frame_id);
 
                 self.load_page_from_disk(page_id, free_frame_id)?;
+                log::trace!("Loaded page_id={page_id} into frame_id={free_frame_id} from disk");
 
                 let frame = self
                     .frames

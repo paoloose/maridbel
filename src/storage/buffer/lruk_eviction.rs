@@ -52,11 +52,13 @@ impl LRUKEvictionPolicy {
     #[allow(unused)]
     fn debug_dump(&self) {
         let frames = self.nodes_store.read().unwrap();
-        println!("Current timestamp: {}", self.get_timestamp());
+        log::debug!("Current timestamp: {}", self.get_timestamp());
         for (frame_id, node) in frames.iter() {
-            println!(
+            log::debug!(
                 "FrameId: {}, Evictable: {}, History: {:?}",
-                frame_id, node.is_evictable, node.history
+                frame_id,
+                node.is_evictable,
+                node.history
             );
         }
     }
