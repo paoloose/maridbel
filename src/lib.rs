@@ -34,3 +34,7 @@ pub mod dbms {
     mod database;
     pub use database::Database;
 }
+
+pub mod shared {
+    pub mod logger;
+}

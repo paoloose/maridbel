@@ -4,4 +4,6 @@ version = "0.0.0-rc.1"
 edition = "2021"
 
 [dependencies]
+env_logger = "0.10.2"
+log = "0.4.27"
 oneshot = { path = "crates/oneshot" }
