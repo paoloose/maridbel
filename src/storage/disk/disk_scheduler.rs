@@ -4,7 +4,6 @@ use crate::storage::page::THE_EMPTY_PAGE;
 use crate::storage::{Frame, PageId};
 use oneshot::{OneshotChannelReceiver, OneshotChannelSender};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::panic;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -39,20 +38,6 @@ impl DiskScheduler {
         let moved_queue = queue.clone();
 
         let handle = std::thread::spawn(move || {
-            let hook = panic::take_hook();
-            panic::set_hook(Box::new(move |info| {
-                hook(info);
-                log::error!("Disk scheduler thread panicked: {:#?}", info);
-                if let Some(payload) = info.payload().downcast_ref::<&str>() {
-                    log::error!("Payload: {}", payload);
-                } else if let Some(payload) = info.payload().downcast_ref::<String>() {
-                    log::error!("Payload: {}", payload);
-                } else {
-                    log::error!("Payload: <unknown>");
-                }
-                panic!();
-            }));
-
             let queue = moved_queue;
 
             // TODO: where io_uring will fit here
@@ -143,7 +128,7 @@ impl DiskScheduler {
         let (tx, rx) = oneshot::channel::<ScheduleResult>();
 
         if self.handle.is_finished() {
-            panic!("Disk scheduler thread has finished");
+            panic!("Disk scheduler thread has finished. TODO: panic gracefully");
         }
         self.requests_queue
             .lock()
@@ -165,7 +150,7 @@ impl DiskScheduler {
         let (tx, rx) = oneshot::channel::<ScheduleResult>();
 
         if self.handle.is_finished() {
-            panic!("Disk scheduler thread has finished");
+            panic!("Disk scheduler thread has finished. TODO: panic gracefully");
         }
         self.requests_queue
             .lock()
@@ -189,11 +174,13 @@ fn page_id_to_file_offset(id: PageId) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::logger::setup_logger;
     use crate::storage::buffer::frame::Frame;
     use std::io::Cursor;
 
     #[test]
     fn test_disk_scheduler() {
+        setup_logger();
         let frame1 = Arc::new(RwLock::new(Frame::new(
             vec![0u8; PAGE_SIZE].into_boxed_slice(),
         )));
